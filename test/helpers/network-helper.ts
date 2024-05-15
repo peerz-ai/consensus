@@ -12,7 +12,7 @@ export const getDefaultNetworkState = async (length: number): Promise<NetworkSta
   const peers = Array.from({ length }, () => 1);
   // create random throughput and layers
   const throughputs = peers.map((x) => Math.floor(Math.random() * 1000));
-  const layers = peers.map((x) => Math.floor(Math.random() * 5));
+  const layers = peers.map((x) => Math.floor(Math.random() * 5 + 1));
   const peerIds = await Promise.all(peers.map(() => generatePeerID()));
   // return the network state
   return peerIds.map((peerId, index) => ({

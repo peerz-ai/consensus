@@ -134,9 +134,11 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         console.log("periodReward: %d", periodReward);
 
         // update last update
-        /* lastUpdate = block.timestamp;
+        lastUpdate = block.timestamp;
 
         uint256 peersReward = periodReward * (100 - VALIDATOR_PERCENTAGE) / 100;
+
+        console.log("peersReward: %d", peersReward);
 
         // Distributes rewards to peers based on their contribution.
         for (uint256 i = 0; i < peerIds.length; i++) {
@@ -155,19 +157,24 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
             uint256 balance = (contribution * peersReward) / total;
             // update peer balance
             peerBalances[peer] += balance;
+
+            console.log("peer %d balance %d", peer, balance);
+            console.log("throughput %d layers %d", throughput, layer);
             // emit event
             emit BalancesUpdated(peer, balance);
         }
 
         // Distributes rewards to validators based on their contribution.
         uint256 validatorsReward = periodReward - peersReward;
+        console.log("validatorsReward: %d", validatorsReward);
         uint256 validatorReward = validatorsReward / _acceptedValidators.length;
         for (uint256 i = 0; i < _acceptedValidators.length; i++) {
             address validator = _acceptedValidators[i];
             validatorBalances[validator] += validatorReward;
+            console.log("validator %d balance: %d", validator, validatorReward);
             // emit event
             emit BalancesUpdated(validator, validatorReward);
-        } */
+        }
     }
 
     /**
