@@ -2,7 +2,7 @@ import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 import { ethers } from 'hardhat';
 const { expect } = require("chai");
 
-import { PRZ } from '@/generated-types/ethers';
+import { PRZ, PoolMock } from '@/generated-types/ethers';
 import { wei } from '@/scripts/utils/utils';
 import { Reverter } from '@/test/helpers/reverter';
 
@@ -14,6 +14,7 @@ describe('PRZ', () => {
   let MINTER: SignerWithAddress;
 
   let prz: PRZ;
+  let pool: PoolMock;
 
   const cap = wei('100');
 
@@ -22,6 +23,9 @@ describe('PRZ', () => {
 
     const PRZFactory = await ethers.getContractFactory('PRZ');
     prz = await PRZFactory.deploy(cap);
+
+    const PoolFactory = await ethers.getContractFactory('PoolMock');
+    pool = await PoolFactory.deploy();
 
     await reverter.snapshot();
   });
@@ -81,6 +85,16 @@ describe('PRZ', () => {
         'OwnableUnauthorizedAccount'
       );
     });
+  });
+
+  describe('transfer', () => {
+    it('should revert if trying to transfer to contract', async () => {
+      await prz.mint(await SECOND.getAddress(), wei('10'));
+      await expect(prz.connect(SECOND).transfer(await pool.getAddress(), wei('10'))).to.be.revertedWith(
+        'PRZ: only EOA allowed'
+      );
+    });
+    // test change eoa function
   });
 
   describe('burn', () => {
