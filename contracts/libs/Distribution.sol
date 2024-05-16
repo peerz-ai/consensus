@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "hardhat/console.sol";
+
 library Distribution {
     uint256 constant SECONDS_IN_A_DAY = 86400;
     uint256 constant SECONDS_IN_A_YEAR = 31536000;
@@ -46,40 +48,15 @@ library Distribution {
         returns (uint256 accumulatedDistribution)
     {
         require(currentTime > lastUpdate, "Current time must be greater than last update time.");
+        
         if (lastUpdate == 0) {
             lastUpdate = startTime; // Initialize lastUpdate to startTime if it's zero
         }
-        require(lastUpdate >= startTime, "Last update time must be after or equal to start time.");
 
-        uint256 startDayLastUpdate = lastUpdate - (lastUpdate % SECONDS_IN_A_DAY);
-        uint256 startDayCurrentTime = currentTime - (currentTime % SECONDS_IN_A_DAY);
+        uint256 dailyDistribution = dailyDistribution(totalSupply, startTime, currentTime);
 
-        if (startDayLastUpdate < startTime) {
-            startDayLastUpdate = startTime; // Adjust to start time if initial day is before start
-        }
+        uint256 timeElapsed = currentTime - lastUpdate;
 
-        // Calculate full days distribution
-        uint256 fullDays = (startDayCurrentTime - startDayLastUpdate) / SECONDS_IN_A_DAY;
-        accumulatedDistribution = 0;
-        for (uint256 day = 0; day < fullDays; day++) {
-            uint256 dayTime = startDayLastUpdate + (day * SECONDS_IN_A_DAY);
-            if (dayTime >= startTime) {
-                accumulatedDistribution += dailyDistribution(totalSupply, startTime, dayTime);
-            }
-        }
-
-        // Calculate distribution for the first partial day
-        if (lastUpdate > startDayLastUpdate && startDayLastUpdate >= startTime) {
-            uint256 firstPartialDayDistribution = dailyDistribution(totalSupply, startTime, startDayLastUpdate);
-            accumulatedDistribution += (firstPartialDayDistribution * (SECONDS_IN_A_DAY - (lastUpdate % SECONDS_IN_A_DAY))) / SECONDS_IN_A_DAY;
-        }
-
-        // Calculate distribution for the last partial day
-        if (currentTime % SECONDS_IN_A_DAY != 0 && startDayCurrentTime >= startTime) {
-            uint256 lastPartialDayDistribution = dailyDistribution(totalSupply, startTime, startDayCurrentTime);
-            accumulatedDistribution += (lastPartialDayDistribution * (currentTime % SECONDS_IN_A_DAY)) / SECONDS_IN_A_DAY;
-        }
-
-        return accumulatedDistribution;
+        return dailyDistribution * timeElapsed / SECONDS_IN_A_DAY;
     }
 }

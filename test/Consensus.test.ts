@@ -238,7 +238,7 @@ describe('Consensus', function () {
 
       const timestamp = await getCurrentBlockTime();
 
-      await setNextTime(timestamp + oneDay * 2);
+      await setNextTime(timestamp + 60);
 
       const a = await consensus.validateNetworkState(
         peerIds,
