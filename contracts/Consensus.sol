@@ -186,11 +186,15 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
 
         require(block.timestamp > rewardStart, "CNS: rewards not started yet");
 
-        uint256 pendingRewards_ = peerBalances[user_];
-        require(pendingRewards_ > 0, "CNS: nothing to claim");
+        uint256 pendingPeerRewards_ = peerBalances[user_];
+        uint256 pendingValidatorRewards_ = validatorBalances[user_];
+        require(pendingPeerRewards_ > 0 || pendingValidatorRewards_ > 0, "CNS: nothing to claim");
 
         // Update user data
         peerBalances[user_] = 0;
+        validatorBalances[user_] = 0;
+
+        uint256 pendingRewards_ = pendingPeerRewards_ + pendingValidatorRewards_;
 
         // mint rewards
         L2Sender(l2Sender).sendMintMessage{value: msg.value}(receiver_, pendingRewards_, user_);
