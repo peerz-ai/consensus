@@ -12,7 +12,7 @@ library Distribution {
 
     // Calculates daily token distribution based on the time elapsed since the start
     function dailyDistribution(
-        uint256 totalSupply,
+        uint256 maxSupply,
         uint256 startTime,
         uint256 currentTime
     )
@@ -20,10 +20,11 @@ library Distribution {
         pure
         returns (uint256 distributionAmount)
     {
-        require(currentTime >= startTime, "Current time is before start time.");
+        if (currentTime < startTime) return 0;
+
         uint256 timeElapsed = currentTime - startTime;
 
-        uint256 initialDailyDistribution = (totalSupply * INITIAL_DISTRIBUTION_FRACTION / 100) / DAYS_INITIAL_PERIOD;
+        uint256 initialDailyDistribution = (maxSupply * INITIAL_DISTRIBUTION_FRACTION / 100) / DAYS_INITIAL_PERIOD;
 
         if (timeElapsed < INITIAL_PERIOD_SECONDS) {
             return initialDailyDistribution;
@@ -38,7 +39,7 @@ library Distribution {
 
     // Calculate accumulated token distribution between last update and current time
     function calculateAccumulatedDistribution(
-        uint256 totalSupply,
+        uint256 maxSupply,
         uint256 startTime,
         uint256 lastUpdate,
         uint256 currentTime
@@ -47,13 +48,16 @@ library Distribution {
         pure
         returns (uint256 accumulatedDistribution)
     {
-        require(currentTime > lastUpdate, "Current time must be greater than last update time.");
-        
-        if (lastUpdate == 0) {
-            lastUpdate = startTime; // Initialize lastUpdate to startTime if it's zero
+        // Initialize lastUpdate to startTime if it's zero
+        if (lastUpdate < startTime) {
+            lastUpdate = startTime;
         }
 
-        uint256 dailyDistribution = dailyDistribution(totalSupply, startTime, currentTime);
+        if (lastUpdate > currentTime) {
+            lastUpdate = currentTime;
+        }
+
+        uint256 dailyDistribution = dailyDistribution(maxSupply, startTime, currentTime);
 
         uint256 timeElapsed = currentTime - lastUpdate;
 

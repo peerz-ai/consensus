@@ -13,8 +13,8 @@ contract ConsensusV2 is UUPSUpgradeable {
         return 2;
     }
 
-    function calculateAccumulatedDistribution(uint128 startTime_, uint128 endTime_) public view returns (uint256) {
-        return Distribution.calculateAccumulatedDistribution(1000000, startTime_, 0, endTime_);
+    function calculateAccumulatedDistribution(uint256 maxSupply_, uint256 startTime_, uint256 lastUpdate_, uint256 currentTime_) public view returns (uint256) {
+        return Distribution.calculateAccumulatedDistribution(maxSupply_, startTime_, lastUpdate_, currentTime_);
     }
 
     function _authorizeUpgrade(address) internal view override {}
