@@ -22,7 +22,7 @@ export const getDefaultNetworkState = async (length: number): Promise<NetworkSta
   }));
 };
 
-function generatePeerID() {
+export const generatePeerID = () => {
   // Generate an RSA key pair
   const keypair = forge.pki.rsa.generateKeyPair({ bits: 2048 });
   const publicKey = forge.pki.publicKeyToPem(keypair.publicKey);
@@ -37,4 +37,4 @@ function generatePeerID() {
   const base58ID = '12D' + bs58.encode(bytes); // The '12D' prefix is an arbitrary choice for demonstration
 
   return base58ID;
-}
+};

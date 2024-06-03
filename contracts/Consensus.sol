@@ -195,7 +195,7 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         validatorBalances[user_] = 0;
 
         uint256 pendingRewards_ = pendingPeerRewards_ + pendingValidatorRewards_;
-
+        
         // mint rewards
         L2Sender(l2Sender).sendMintMessage{value: msg.value}(receiver_, pendingRewards_, user_);
 

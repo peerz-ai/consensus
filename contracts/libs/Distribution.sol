@@ -26,12 +26,20 @@ library Distribution {
 
         uint256 initialDailyDistribution = (maxSupply * INITIAL_DISTRIBUTION_FRACTION / 100) / DAYS_INITIAL_PERIOD;
 
-        if (timeElapsed < INITIAL_PERIOD_SECONDS) {
+        console.log("Initial daily distribution: %s", initialDailyDistribution);
+
+        if (timeElapsed <= INITIAL_PERIOD_SECONDS) {
             return initialDailyDistribution;
         }
+
+        console.log("Time elapsed: %s", timeElapsed);
         
         // Time after the initial period
-        uint256 periodsElapsed = timeElapsed / SECONDS_IN_A_YEAR;
+        uint256 periodsElapsed = 1 + timeElapsed / SECONDS_IN_A_YEAR;
+
+        console.log("Periods elapsed: %s", periodsElapsed);
+
+        console.log("return: %s", initialDailyDistribution >> periodsElapsed);
 
         // Apply halving based on the number of years elapsed since the initial period
         return initialDailyDistribution >> periodsElapsed;
@@ -60,6 +68,9 @@ library Distribution {
         uint256 dailyDistribution = dailyDistribution(maxSupply, startTime, currentTime);
 
         uint256 timeElapsed = currentTime - lastUpdate;
+
+        console.log("timeElapsed: %s", timeElapsed);
+        console.log("dailyDistribution: %s", dailyDistribution);
 
         return dailyDistribution * timeElapsed / SECONDS_IN_A_DAY;
     }
