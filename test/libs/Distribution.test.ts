@@ -114,17 +114,6 @@ describe('Distribution', () => {
       expect(reward).to.eq(expectedReward);
     });
 
-    /* it('should handle updates spanning initial and post-initial periods', async () => {
-      lastUpdate = startTime + initialPeriod - oneDay;
-      currentTime = lastUpdate + oneWeek; // spans across the initial and post-initial period
-      const reward = await lib.calculateAccumulatedDistribution(maxSupply, startTime, lastUpdate, currentTime);
-      const initialReward = initialDailyReward; // reward for the last day of initial period
-      const postInitialReward = initialDailyReward / BigInt(2); // halved reward after initial period
-      const expectedReward = initialReward + (postInitialReward * BigInt(6)); // 1 day of initial + 6 days of post-initial
-
-      expect(reward).to.eq(expectedReward);
-    }); */
-
     it('should handle small maxSupply over a long period', async () => {
       lastUpdate = startTime + oneYear * 5;
       currentTime = lastUpdate + oneDay; // a day after 5 years
@@ -139,5 +128,89 @@ describe('Distribution', () => {
       expect(reward).to.eq(sixthYearReward); // day post 5 years
     });
 
+    it('should handle fractional maxSupply correctly', async () => {
+      maxSupply = wei(500.5);
+      currentTime = startTime + initialPeriod / 2;
+      const reward = await lib.calculateAccumulatedDistribution(maxSupply, startTime, lastUpdate, currentTime);
+      const expectedReward = (maxSupply * BigInt(20) / BigInt(100)) / BigInt(90) * BigInt(45); // 20% of maxSupply over 90 days, half period
+
+      expect(reward).to.eq(expectedReward);
+    });
+
+    it('should handle zero maxSupply correctly', async () => {
+      maxSupply = wei(0);
+      currentTime = startTime + initialPeriod / 2;
+      const reward = await lib.calculateAccumulatedDistribution(maxSupply, startTime, lastUpdate, currentTime);
+
+      expect(reward).to.eq(wei(0));
+    });
+
+    it('should handle updates exactly two years minus one day after start time', async () => {
+      lastUpdate = startTime + oneYear;
+      currentTime = lastUpdate + oneYear - oneDay; // exactly two years after initial period
+      const reward = await lib.calculateAccumulatedDistribution(maxSupply, startTime, lastUpdate, currentTime);
+      const dailyReward = initialDailyReward / BigInt(2); // halved after first year
+      const secondYearReward = dailyReward / BigInt(2); // halved again after second year
+      const expectedReward = secondYearReward * BigInt(364); // one year of rewards after two years
+
+      expect(reward).to.eq(expectedReward);
+    });
+
+    it('should handle updates exactly one minute after two years', async () => {
+      lastUpdate = startTime + 2 * oneYear;
+      currentTime = lastUpdate + 60; // exactly two years after initial period
+      const reward = await lib.calculateAccumulatedDistribution(maxSupply, startTime, lastUpdate, currentTime);
+      const dailyReward = initialDailyReward / BigInt(2); // halved after first year
+      const secondYearReward = dailyReward / BigInt(2); // halved again after second year
+      const thirdYearReward = secondYearReward / BigInt(2); // halved again after third year
+
+      expect(reward).to.eq(thirdYearReward * BigInt(60) / BigInt(oneDay)); // 1 minute reward after two years
+    });
+
+    it('should handle updates with maxSupply as a large prime number', async () => {
+      maxSupply = wei(982451653); // large prime number
+      currentTime = startTime + initialPeriod / 2;
+      const reward = await lib.calculateAccumulatedDistribution(maxSupply, startTime, lastUpdate, currentTime);
+      const expectedReward = (maxSupply * BigInt(20) / BigInt(100)) / BigInt(90) * BigInt(45); // 20% of maxSupply over 90 days, half period
+
+      expect(reward).to.eq(expectedReward);
+    });
+
+    it('should handle updates with maxSupply as a small prime number', async () => {
+      maxSupply = wei(17); // small prime number
+      currentTime = startTime + initialPeriod / 2;
+      const reward = await lib.calculateAccumulatedDistribution(maxSupply, startTime, lastUpdate, currentTime);
+      const expectedReward = (maxSupply * BigInt(20) / BigInt(100)) / BigInt(90) * BigInt(45); // 20% of maxSupply over 90 days, half period
+
+      expect(reward).to.eq(expectedReward);
+    });
+
+    it('should handle updates for a leap second', async () => {
+      lastUpdate = startTime + initialPeriod + 60;
+      currentTime = lastUpdate + 1; // exactly one year and one leap second after initial period
+      const reward = await lib.calculateAccumulatedDistribution(maxSupply, startTime, lastUpdate, currentTime);
+      const postInitialReward = initialDailyReward / BigInt(2); // halved reward after initial period
+
+      expect(reward).to.eq(postInitialReward / BigInt(oneDay)); // 1 second
+    });
+
+    it('should handle updates ten years after start', async () => {
+      lastUpdate = startTime + 10 * oneYear + oneDay;
+      currentTime = lastUpdate + 60; // exactly ten years after initial period
+      const reward = await lib.calculateAccumulatedDistribution(maxSupply, startTime, lastUpdate, currentTime);
+      const dailyReward = initialDailyReward / BigInt(2); // halved after first year
+      const secondYearReward = dailyReward / BigInt(2); // halved again after second year
+      const thirdYearReward = secondYearReward / BigInt(2); // halved again after third year
+      const fourthYearReward = thirdYearReward / BigInt(2); // halved again after fourth year
+      const fifthYearReward = fourthYearReward / BigInt(2); // halved again after fifth year
+      const sixthYearReward = fifthYearReward / BigInt(2); // halved again after sixth year
+      const seventhYearReward = sixthYearReward / BigInt(2); // halved again after seventh year
+      const eighthYearReward = seventhYearReward / BigInt(2); // halved again after eighth year
+      const ninthYearReward = eighthYearReward / BigInt(2); // halved again after ninth year
+      const tenthYearReward = ninthYearReward / BigInt(2); // halved again after tenth year
+      const eleventhYearReward = tenthYearReward / BigInt(2); // halved again after eleventh year
+
+      expect(reward).to.eq(eleventhYearReward * BigInt(60) / BigInt(oneDay)); // 1 minute reward after ten years
+    });
   });
 });

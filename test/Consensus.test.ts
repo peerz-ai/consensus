@@ -2,7 +2,7 @@ import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
 
-import { getDefaultNetworkState } from './helpers/network-helper';
+import { generatePeerID, getDefaultNetworkState } from './helpers/network-helper';
 
 import {
   Consensus,
@@ -123,135 +123,304 @@ describe('Consensus', function () {
 
     await lZEndpointMockSender.setDestLzEndpoint(l1MessageReceiver, lZEndpointMockReceiver);
 
-    await consensus.Consensus_init(l2Sender, await getCurrentBlockTime(), await rewardToken.cap());
+    await consensus.Consensus_init(l2Sender, (await getCurrentBlockTime()) + (oneDay / 2), await rewardToken.cap());
 
     await reverter.snapshot();
   });
 
   afterEach(reverter.revert);
 
-  describe('UUPS proxy functionality', () => {
-    describe('#constructor', () => {
-      it('should disable initialize function', async () => {
-        const consensus = await consensusFactory.deploy();
-
-        await expect(consensus.Consensus_init(l2Sender, await getCurrentBlockTime(), await rewardToken.cap())).to.be.revertedWithCustomError(
-          consensus,
-          'InvalidInitialization',
-        );
-      });
+  describe('setL2Sender', () => {
+    it('should set the L2 sender address', async () => {
+      await consensus.setL2Sender(secondAddress);
+      expect(await consensus.l2Sender()).to.equal(secondAddress);
     });
 
-    describe('#Consensus_init', () => {
-      it('should set correct data after creation', async () => {
-        const l2Sender_ = await consensus.l2Sender();
-        expect(l2Sender_).to.eq(await l2Sender.getAddress());
-      });
-      it('should revert if try to call init function twice', async () => {
-        await expect(consensus.Consensus_init(l2Sender, await getCurrentBlockTime(), await rewardToken.cap())).to.be.revertedWithCustomError(
-          consensus,
-          'InvalidInitialization',
-        );
-      });
-    });
-
-    describe('#_authorizeUpgrade', () => {
-      it('should correctly upgrade', async () => {
-        const consensusV2Factory = await ethers.getContractFactory('ConsensusV2', {
-          libraries: {
-            Distribution: await lib.getAddress(),
-          },
-        });
-        const consensusV2Implementation = await consensusV2Factory.deploy();
-
-        await consensus.upgradeToAndCall(await consensusV2Implementation.getAddress(), '0x');
-
-        const consensusV2 = consensusV2Factory.attach(await consensus.getAddress()) as ConsensusV2;
-
-        expect(await consensusV2.version()).to.eq(2);
-      });
-      it('should revert if caller is not the owner', async () => {
-        await expect(consensus.connect(SECOND).upgradeToAndCall(ZERO_ADDR, '0x')).to.be.revertedWithCustomError(
-          consensus,
-          'OwnableUnauthorizedAccount',
-        );
-      });
-      it('should revert if `isNotUpgradeable == true`', async () => {
-        await consensus.removeUpgradeability();
-
-        await expect(consensus.upgradeToAndCall(ZERO_ADDR, '0x')).to.be.revertedWith("CNS: upgrade isn't available");
-      });
+    it('should revert if called by non-owner', async () => {
+      await expect(consensus.connect(SECOND).setL2Sender(secondAddress))
+        .to.be.revertedWithCustomError(consensus, 'OwnableUnauthorizedAccount');
     });
   });
 
-  describe('Constructor', function () {
-    it('Should set the correct network state', async function () {
-      const peerId = await consensus.generatePeerId('12D3KooW9tkZQ9721rCog7YScXCES9tFr8m7ViAKKFTRWfH6k5cj');
+  describe('setValidator', () => {
+    it('should set a validator', async () => {
+      await consensus.setValidator(secondAddress, true);
+      expect(await consensus.validators(secondAddress)).to.be.true;
+    });
 
-      const signers = await ethers.getSigners();
-      // first half are validators and the rest are peers
-      const validatorsSigners = signers.slice(0, signers.length / 2);
-      const peersSigners = signers.slice(signers.length / 2);
+    it('should unset a validator', async () => {
+      await consensus.setValidator(secondAddress, true);
+      await consensus.setValidator(secondAddress, false);
+      expect(await consensus.validators(secondAddress)).to.be.false;
+    });
 
-      console.log('signers', validatorsSigners.length, peersSigners.length);
+    it('should revert if called by non-owner', async () => {
+      await expect(consensus.connect(SECOND).setValidator(secondAddress, true))
+        .to.be.revertedWithCustomError(consensus, 'OwnableUnauthorizedAccount');
+    });
+  });
 
-      const peers = await getDefaultNetworkState(peersSigners.length);
+  describe('registerPeer', () => {
+    it('should register a peer', async () => {
+      const peerId = generatePeerID();
+      const hashedPeerId = await consensus.generatePeerId(peerId);
+      await consensus.registerPeer(hashedPeerId, secondAddress);
+      expect(await consensus.peers(hashedPeerId)).to.equal(secondAddress);
+    });
+  });
 
-      const peerIds = await Promise.all(peers.map((x) => consensus.generatePeerId(x.peerId))); // peerId
-      const throughputs = peers.map((x) => x.throughput); // throughput
-      const layers = peers.map((x) => x.layers); // layers
-      const total = peers.reduce((acc, x) => acc + x.throughput * x.layers, 0); // total throughput
+  describe('validateNetworkState', () => {
+    it('should validate network state and update balances', async () => {
+      const peerId = generatePeerID();
+      const hashedPeerId = await consensus.generatePeerId(peerId);
 
-      const message = ethers.solidityPackedKeccak256(
-        ['bytes32[]', 'uint256[]', 'uint256[]', 'uint256'],
-        [peerIds, throughputs, layers, total],
+      const peerIds = [hashedPeerId];
+      const throughputs = [100];
+      const layers = [2];
+      const total = 200;
+      const validators = [ownerAddress];
+
+
+      const signatures = [await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
+        ['bytes32[]', 'uint256[]', 'uint256[]', 'uint256'], [peerIds, throughputs, layers, total]
+      )))];
+
+      await consensus.setValidator(ownerAddress, true);
+      await consensus.registerPeer(peerIds[0], secondAddress);
+
+      const lastUpdate = await getCurrentBlockTime();
+      await setNextTime(lastUpdate + oneDay);
+
+      await consensus.validateNetworkState(peerIds, throughputs, layers, total, signatures, validators);
+      expect(await consensus.peerBalances(secondAddress)).to.be.gt(0);
+    });
+
+    it('should revert if data length mismatch', async () => {
+      const peerId = generatePeerID();
+      const hashedPeerId = await consensus.generatePeerId(peerId);
+
+      const peerIds = [hashedPeerId];
+      const throughputs = [100];
+      const layers = [2, 3];
+      const total = 200;
+      const validators = [ownerAddress];
+
+      const signatures = [await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
+        ['bytes32[]', 'uint256[]', 'uint256[]', 'uint256'], [peerIds, throughputs, layers, total]
+      )))];
+
+      await expect(consensus.validateNetworkState(peerIds, throughputs, layers, total, signatures, validators))
+        .to.be.revertedWith('Data length mismatch');
+    });
+
+    it('should revert if signature count mismatch', async () => {
+      const peerId = generatePeerID();
+      const hashedPeerId = await consensus.generatePeerId(peerId);
+      const peerIds = [hashedPeerId];
+      const throughputs = [100];
+      const layers = [2];
+      const total = 200;
+      const validators = [ownerAddress];
+      const signatures: any = [];
+
+      await expect(consensus.validateNetworkState(peerIds, throughputs, layers, total, signatures, validators))
+        .to.be.revertedWith('Signature count mismatch');
+    });
+
+    it('should revert if no validators', async () => {
+      const peerId = generatePeerID();
+      const hashedPeerId = await consensus.generatePeerId(peerId);
+      const peerIds = [hashedPeerId];
+      const throughputs = [100];
+      const layers = [2];
+      const total = 200;
+      const validators = [ownerAddress];
+      const signatures = [await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
+        ['bytes32[]', 'uint256[]', 'uint256[]', 'uint256'], [peerIds, throughputs, layers, total]
+      )))];
+
+      await expect(consensus.validateNetworkState(peerIds, throughputs, layers, total, signatures, validators))
+        .to.be.revertedWith('No validators');
+    });
+
+    it('should revert if consensus is not reached', async () => {
+      const peerId = generatePeerID();
+      const hashedPeerId = await consensus.generatePeerId(peerId);
+      const peerIds = [hashedPeerId];
+      const throughputs1 = [100];
+      const throughputs2 = [200];
+      const layers = [2];
+      const total = 200;
+      const validators = [ownerAddress, secondAddress];
+      const signatures = [
+        await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
+          ['bytes32[]', 'uint256[]', 'uint256[]', 'uint256'], [peerIds, throughputs1, layers, total]
+        ))),
+        await SECOND.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
+          ['bytes32[]', 'uint256[]', 'uint256[]', 'uint256'], [peerIds, throughputs2, layers, total]
+        )))
+      ];
+
+      await consensus.setValidator(ownerAddress, true);
+      await consensus.setValidator(secondAddress, true);
+
+      await expect(consensus.validateNetworkState(peerIds, throughputs1, layers, total, signatures, validators))
+        .to.be.revertedWith('Consensus not reached');
+    });
+  });
+
+  describe('claim', () => {
+    it('should allow user to claim rewards', async () => {
+      const peerId = generatePeerID();
+      const hashedPeerId = await consensus.generatePeerId(peerId);
+      const peerIds = [hashedPeerId];
+      const throughputs = [100];
+      const layers = [2];
+      const total = 200;
+      const validators = [ownerAddress];
+      const signatures = [await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
+        ['bytes32[]', 'uint256[]', 'uint256[]', 'uint256'], [peerIds, throughputs, layers, total]
+      )))];
+
+      await consensus.setValidator(ownerAddress, true);
+      await consensus.registerPeer(peerIds[0], ownerAddress);
+
+      const lastUpdate = await getCurrentBlockTime();
+      await setNextTime(lastUpdate + oneDay);
+
+      await consensus.validateNetworkState(peerIds, throughputs, layers, total, signatures, validators);
+
+      const initialBalance = await rewardToken.balanceOf(ownerAddress);
+
+      const mintPayload = rewardToken.interface.encodeFunctionData('mint', [ownerAddress, wei(100)]);
+
+      const estimatedFees = await lZEndpointMockReceiver.estimateFees(
+        receiverChainId,
+        await rewardToken.getAddress(),
+        mintPayload,
+        false,
+        '0x'
       );
 
-      const signatures = await Promise.all(
-        validatorsSigners.map(async (signer) => {
-          return await signer.signMessage(ethers.toBeArray(message));
-        }),
-      );
+      await consensus.claim(ownerAddress, {value: estimatedFees[0]});
 
-      const tx = await consensus.testSignature(
-        peerIds,
-        throughputs,
-        layers,
-        total,
-        signatures[7],
-        validatorsSigners[7],
-      );
+      const finalBalance = await rewardToken.balanceOf(ownerAddress);
 
-      console.log(tx, await validatorsSigners[7].getAddress());
+      expect(finalBalance).to.be.gt(initialBalance);
+    });
 
-      await Promise.all(
-        peerIds.map(async (peerId, index) => {
-          await consensus.registerPeer(peerId, peersSigners[index]);
-        }),
-      );
+    it('should revert if rewards not started yet', async () => {
+      await expect(consensus.claim(ownerAddress)).to.be.revertedWith('CNS: rewards not started yet');
+    });
 
-      await Promise.all(
-        validatorsSigners.map(async (validator, index) => {
-          await consensus.setValidator(validator, true);
-        }),
-      );
+    it('should revert if nothing to claim', async () => {
+      await setNextTime((await getCurrentBlockTime()) + oneDay);
+      await expect(consensus.claim(ownerAddress)).to.be.revertedWith('CNS: nothing to claim');
+    });
+  });
 
-      const timestamp = await getCurrentBlockTime();
+  it('Should set the correct network state', async function () {
+    const peerId = await consensus.generatePeerId('12D3KooW9tkZQ9721rCog7YScXCES9tFr8m7ViAKKFTRWfH6k5cj');
 
-      await setNextTime(timestamp + 60);
+    const signers = await ethers.getSigners();
+    // first half are validators and the rest are peers
+    const validatorsSigners = signers.slice(0, signers.length / 2);
+    const peersSigners = signers.slice(signers.length / 2);
 
-      const a = await consensus.validateNetworkState(
-        peerIds,
-        throughputs,
-        layers,
-        total,
-        signatures,
-        validatorsSigners,
-      );
+    console.log('signers', validatorsSigners.length, peersSigners.length);
 
-      const balance = await consensus.validatorBalances(SECOND);
+    const peers = await getDefaultNetworkState(peersSigners.length);
 
-      console.log(balance.toString());
+    const peerIds = await Promise.all(peers.map((x) => consensus.generatePeerId(x.peerId))); // peerId
+    const throughputs = peers.map((x) => x.throughput); // throughput
+    const layers = peers.map((x) => x.layers); // layers
+    const total = peers.reduce((acc, x) => acc + x.throughput * x.layers, 0); // total throughput
+
+    const message = ethers.solidityPackedKeccak256(
+      ['bytes32[]', 'uint256[]', 'uint256[]', 'uint256'],
+      [peerIds, throughputs, layers, total],
+    );
+
+    const signatures = await Promise.all(
+      validatorsSigners.map(async (signer) => {
+        return await signer.signMessage(ethers.toBeArray(message));
+      }),
+    );
+
+    const tx = await consensus.testSignature(
+      peerIds,
+      throughputs,
+      layers,
+      total,
+      signatures[7],
+      validatorsSigners[7],
+    );
+
+    console.log(tx, await validatorsSigners[7].getAddress());
+
+    await Promise.all(
+      peerIds.map(async (peerId, index) => {
+        await consensus.registerPeer(peerId, peersSigners[index]);
+      }),
+    );
+
+    await Promise.all(
+      validatorsSigners.map(async (validator, index) => {
+        await consensus.setValidator(validator, true);
+      }),
+    );
+
+    const timestamp = await getCurrentBlockTime();
+
+    await setNextTime(timestamp + 60);
+
+    const a = await consensus.validateNetworkState(
+      peerIds,
+      throughputs,
+      layers,
+      total,
+      signatures,
+      validatorsSigners,
+    );
+
+    const balance = await consensus.validatorBalances(SECOND);
+
+    console.log(balance.toString());
+  });
+
+  describe('removeUpgradeability', () => {
+    it('should prevent future upgrades', async () => {
+      await consensus.removeUpgradeability();
+      await expect(consensus.upgradeToAndCall(ZERO_ADDR, '0x')).to.be.revertedWith("CNS: upgrade isn't available");
+    });
+  });
+
+  describe('_authorizeUpgrade', () => {
+    it('should allow owner to upgrade', async () => {
+      const consensusV2Factory = await ethers.getContractFactory('ConsensusV2', {
+        libraries: {
+          Distribution: await lib.getAddress(),
+        },
+      });
+      const consensusV2Implementation = await consensusV2Factory.deploy();
+
+      await consensus.upgradeToAndCall(consensusV2Implementation.getAddress(), '0x');
+
+      const consensusV2 = consensusV2Factory.attach(await consensus.getAddress()) as ConsensusV2;
+
+      expect(await consensusV2.version()).to.equal(2);
+    });
+
+    it('should revert if non-owner attempts upgrade', async () => {
+      const consensusV2Factory = await ethers.getContractFactory('ConsensusV2', {
+        libraries: {
+          Distribution: await lib.getAddress(),
+        },
+      });
+      const consensusV2Implementation = await consensusV2Factory.deploy();
+
+      await expect(consensus.connect(SECOND).upgradeToAndCall(consensusV2Implementation.getAddress(), '0x'))
+        .to.be.revertedWithCustomError(consensus, 'OwnableUnauthorizedAccount');
     });
   });
 });

@@ -12,8 +12,6 @@ import {Distribution} from "./libs/Distribution.sol";
 import {L2Sender} from "./L2Sender.sol";
 import {IConsensus} from "./interfaces/IConsensus.sol";
 
-import "hardhat/console.sol";
-
 contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
     bool public isNotUpgradeable;
 
@@ -121,8 +119,6 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         // Ensure at least 66% consensus
         require((_acceptedValidators.length * 100) / totalValidators >= 66, "Consensus not reached");
 
-        console.log("rewardStart: %d", rewardStart);
-
         // period reward
         uint256 periodReward = Distribution.calculateAccumulatedDistribution(
             maxSupply,
@@ -131,14 +127,10 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
             block.timestamp
         );
 
-        console.log("periodReward: %d", periodReward);
-
         // update last update
         lastUpdate = block.timestamp;
 
         uint256 peersReward = periodReward * (100 - VALIDATOR_PERCENTAGE) / 100;
-
-        console.log("peersReward: %d", peersReward);
 
         // Distributes rewards to peers based on their contribution.
         for (uint256 i = 0; i < peerIds.length; i++) {
@@ -157,21 +149,17 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
             uint256 balance = (contribution * peersReward) / total;
             // update peer balance
             peerBalances[peer] += balance;
-
-            console.log("peer %d balance %d", peer, balance);
-            console.log("throughput %d layers %d", throughput, layer);
             // emit event
             emit BalancesUpdated(peer, balance);
         }
 
         // Distributes rewards to validators based on their contribution.
         uint256 validatorsReward = periodReward - peersReward;
-        console.log("validatorsReward: %d", validatorsReward);
+
         uint256 validatorReward = validatorsReward / _acceptedValidators.length;
         for (uint256 i = 0; i < _acceptedValidators.length; i++) {
             address validator = _acceptedValidators[i];
             validatorBalances[validator] += validatorReward;
-            console.log("validator %d balance: %d", validator, validatorReward);
             // emit event
             emit BalancesUpdated(validator, validatorReward);
         }
@@ -249,8 +237,6 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
                 keccak256(abi.encodePacked(peerIds, throughputs, layers, total))
             )
         );
-
-        console.logBytes32(dataHash);
 
         return ECDSA.recover(dataHash, signature);
     }
