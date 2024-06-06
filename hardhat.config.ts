@@ -3,9 +3,12 @@ import '@nomicfoundation/hardhat-chai-matchers';
 import '@nomicfoundation/hardhat-ethers';
 import '@solarity/hardhat-markup';
 import '@typechain/hardhat';
+import * as dotenv from 'dotenv';
 import { HardhatUserConfig } from 'hardhat/config';
 import 'solidity-coverage';
 import 'tsconfig-paths/register';
+
+dotenv.config();
 
 function typechainTarget() {
   const target = process.env.TYPECHAIN_TARGET;
@@ -34,12 +37,12 @@ const config: HardhatUserConfig = {
     },
     holesky: {
       url: "https://rpc.ankr.com/eth_holesky",
-      accounts: ['8a144065afe2d2e1ad87e848056de0efa2f225937f75d9eb216a9b40e32bdddf'],
+      accounts: [process.env.PRIVATE_KEY || ''],
       gasMultiplier: 1.2,
     },
     sepolia: {
       url: "https://ethereum-sepolia.rpc.subquery.network/public",
-      accounts: ['8a144065afe2d2e1ad87e848056de0efa2f225937f75d9eb216a9b40e32bdddf'],
+      accounts: [process.env.PRIVATE_KEY || ''],
       gasMultiplier: 1.2,
     }
   },
@@ -67,9 +70,9 @@ const config: HardhatUserConfig = {
   },
   etherscan: {
     apiKey: {
-      mainnet: 'KGC4BRB1N8WVMS46PGQH6S4AY6DNXAQHNT',
-      holesky: 'KGC4BRB1N8WVMS46PGQH6S4AY6DNXAQHNT',
-      sepolia: 'KGC4BRB1N8WVMS46PGQH6S4AY6DNXAQHNT',
+      mainnet: String(process.env.ETHERSCAN_KEY),
+      holesky: String(process.env.ETHERSCAN_KEY),
+      sepolia: String(process.env.ETHERSCAN_KEY),
     }
   }
 };

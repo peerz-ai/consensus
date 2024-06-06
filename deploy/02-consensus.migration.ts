@@ -32,9 +32,9 @@ export = async (deployer: Deployer) => {
   const l2SenderProxy = await deployer.deploy(ERC1967Proxy__factory, [l2SenderImpl, '0x'], {
     name: 'L2Sender Proxy',
   });
-  UserStorage.set('L2Sender Proxy', await l2SenderProxy.getAddress());
+  // UserStorage.set('L2Sender Proxy', await l2SenderProxy.getAddress());
   const l2Sender = L2Sender__factory.connect(await l2SenderProxy.getAddress(), await deployer.getSigner());
-  await l2Sender.L2Sender__init(await consensus.getAddress(), rewardTokenConfig);
+  // await l2Sender.L2Sender__init(await consensus.getAddress(), rewardTokenConfig);
 
   await consensus.Consensus_init(l2Sender, await getCurrentBlockTime(), '1000000000000000000000000000');
 

@@ -12,13 +12,13 @@ export = async (deployer: Deployer) => {
   console.log("Deploying contracts with the account:", owner.address);
 
   const l1MessageReceiver = L1MessageReceiver__factory.connect(
-    '0xdbfbf5eC5d0Ab01e74d29a2AC89Ef629792159f7',
+    UserStorage.get('L1MessageReceiver Proxy'),
     await deployer.getSigner(),
   );
 
-  const l2Sender = L2Sender__factory.connect('0xa822C14B7609766057C01dB5f6C93935BdE37c40', await deployer.getSigner());
+  const l2Sender = L2Sender__factory.connect(UserStorage.get('L2Sender Proxy'), await deployer.getSigner());
 
-  const prz = PRZ__factory.connect('0xcf2F573dA43339784A088BBBBD9c4feE6bf4b362', await deployer.getSigner());
+  const prz = PRZ__factory.connect(UserStorage.get('PRZ'), await deployer.getSigner());
 
   const l1MessageReceiverConfig: IL1MessageReceiver.ConfigStruct = {
     gateway: layerZero,
@@ -29,5 +29,7 @@ export = async (deployer: Deployer) => {
   const tx = await l1MessageReceiver.setParams(prz, l1MessageReceiverConfig);
 
   await Reporter.reportTransactionByHash(tx.hash);
+
+  console.log(UserStorage.getAll())
 
 }
