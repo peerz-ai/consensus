@@ -65,7 +65,7 @@ contract PRZ is IPRZ, ERC20Capped, ERC20Burnable, Ownable {
     /**
      * @dev See {ERC20-_mint}.
      */
-    function mint(address account_, uint256 amount_) external onlyOwner {
+    function mint(address account_, uint256 amount_) external onlyEOAAllowed(account_) onlyOwner {
         _mint(account_, amount_);
     }
 
