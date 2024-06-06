@@ -2,7 +2,7 @@ import { Deployer, Reporter, UserStorage } from '@solarity/hardhat-migrate';
 import { ethers } from "hardhat";
 import { PRZ__factory, L1MessageReceiver__factory, ERC1967Proxy__factory } from '@/generated-types/ethers';
 
-const layerZero = '0x6EDCE65403992e310A62460808c4b910D972f10f';
+const layerZero = '0xae92d5aD7583AD66E49A0c67BAd18F6ba52dDDc1';
 const cap = '1000000000000000000000000000';
 
 export = async (deployer: Deployer) => {

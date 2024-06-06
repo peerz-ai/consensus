@@ -34,11 +34,13 @@ const config: HardhatUserConfig = {
     },
     holesky: {
       url: "https://rpc.ankr.com/eth_holesky",
-      accounts: ['8a144065afe2d2e1ad87e848056de0efa2f225937f75d9eb216a9b40e32bdddf']
+      accounts: ['8a144065afe2d2e1ad87e848056de0efa2f225937f75d9eb216a9b40e32bdddf'],
+      gasMultiplier: 1.2,
     },
     sepolia: {
       url: "https://ethereum-sepolia.rpc.subquery.network/public",
-      accounts: ['8a144065afe2d2e1ad87e848056de0efa2f225937f75d9eb216a9b40e32bdddf']
+      accounts: ['8a144065afe2d2e1ad87e848056de0efa2f225937f75d9eb216a9b40e32bdddf'],
+      gasMultiplier: 1.2,
     }
   },
   typechain: {

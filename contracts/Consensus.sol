@@ -95,6 +95,8 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         require(peerIds.length == throughputs.length && throughputs.length == layers.length, "Data length mismatch");
         require(signatures.length == validators_.length, "Signature count mismatch");
 
+        acceptedValidators = new address[](0);
+
         address[] storage _acceptedValidators = acceptedValidators;
         uint256 totalValidators = 0;
         bytes32 dataHash = keccak256(
