@@ -73,26 +73,24 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
     /**
      * @dev Validates the network state by checking the consensus among validators.
      * @param peerIds The array of peer IDs.
-     * @param throughputs The array of throughputs corresponding to each peer.
-     * @param layers The array of layers corresponding to each peer.
+     * @param contributions The array of contributions corresponding to each peer.
      * @param total The total value used for calculating balances.
      * @param signatures The array of signatures provided by validators.
      * @param validators_ The array of validator addresses.
      * Requirements:
-     * - The lengths of `peerIds`, `throughputs`, and `layers` arrays must be equal.
+     * - The lengths of `peerIds` and `contributions` arrays must be equal.
      * - The length of `signatures` array must be equal to the length of `validators` array.
      * - At least 66% consensus must be reached among validators.
-     * - If consensus is reached, balances are updated according to throughputs.
+     * - If consensus is reached, balances are updated according to contributions.
      */
     function validateNetworkState(
         bytes32[] calldata peerIds,
-        uint256[] calldata throughputs,
-        uint256[] calldata layers,
+        uint256[] calldata contributions,
         uint256 total,
         bytes[] calldata signatures,
         address[] calldata validators_
     ) public {
-        require(peerIds.length == throughputs.length && throughputs.length == layers.length, "Data length mismatch");
+        require(peerIds.length == contributions.length, "Data length mismatch");
         require(signatures.length == validators_.length, "Signature count mismatch");
 
         acceptedValidators = new address[](0);
@@ -102,7 +100,7 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         bytes32 dataHash = keccak256(
             abi.encodePacked(
                 "\x19Ethereum Signed Message:\n32",
-                keccak256(abi.encodePacked(peerIds, throughputs, layers, total))
+                keccak256(abi.encodePacked(peerIds, contributions, total))
             )
         );
 
@@ -138,10 +136,7 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         for (uint256 i = 0; i < peerIds.length; i++) {
             bytes32 peerId = peerIds[i];
             address peer = peers[peerId];
-            // calculate contribution
-            uint256 throughput = throughputs[i];
-            uint256 layer = layers[i];
-            uint256 contribution = throughput * layer;
+            uint256 contribution = contributions[i];
             if (peer == address(0)) {
                 // peer not registered
                 total -= contribution;
@@ -227,8 +222,7 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
 
     function testSignature(
         bytes32[] calldata peerIds,
-        uint256[] calldata throughputs,
-        uint256[] calldata layers,
+        uint256[] calldata contributions,
         uint256 total,
         bytes calldata signature,
         address account
@@ -236,7 +230,7 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         bytes32 dataHash = keccak256(
             abi.encodePacked(
                 "\x19Ethereum Signed Message:\n32",
-                keccak256(abi.encodePacked(peerIds, throughputs, layers, total))
+                keccak256(abi.encodePacked(peerIds, contributions, total))
             )
         );
 

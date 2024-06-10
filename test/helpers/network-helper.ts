@@ -3,22 +3,19 @@ import forge from 'node-forge';
 
 type NetworkState = {
   peerId: string;
-  throughput: number;
-  layers: number;
+  contribution: number;
 };
 
 export const getDefaultNetworkState = async (length: number): Promise<NetworkState[]> => {
   // create 20 peers
   const peers = Array.from({ length }, () => 1);
   // create random throughput and layers
-  const throughputs = peers.map((x) => Math.floor(Math.random() * 1000));
-  const layers = peers.map((x) => Math.floor(Math.random() * 5 + 1));
+  const contributions = peers.map((x) => Math.floor(Math.random() * 1000) + 1);
   const peerIds = await Promise.all(peers.map(() => generatePeerID()));
   // return the network state
   return peerIds.map((peerId, index) => ({
     peerId: peerId.toString(),
-    throughput: throughputs[index],
-    layers: layers[index],
+    contribution: contributions[index],
   }));
 };
 

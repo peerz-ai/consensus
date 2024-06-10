@@ -62,16 +62,14 @@ interface IConsensus {
     /**
      * The function to update the peer's balance.
      * @param peerIds The peers ids.
-     * @param throughputs The peers throughputs.
-     * @param layers The peers layers.
+     * @param contributions The peers contributions.
      * @param total The total throughput mul layers.
      * @param signatures The validators signatures.
      * @param validators The validators addresses.
      */
     function validateNetworkState(
         bytes32[] calldata peerIds,
-        uint256[] calldata throughputs,
-        uint256[] calldata layers,
+        uint256[] calldata contributions,
         uint256 total,
         bytes[] calldata signatures,
         address[] calldata validators

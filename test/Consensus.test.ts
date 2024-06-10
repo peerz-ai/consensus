@@ -111,7 +111,7 @@ describe('Consensus', function () {
     });
 
     // Deploy reward token
-    rewardToken = await PRZFactory.deploy(wei(1000000000));
+    rewardToken = await PRZFactory.deploy(wei(100000000000000));
 
     await rewardToken.transferOwnership(await l1MessageReceiver.getAddress());
 
@@ -175,14 +175,13 @@ describe('Consensus', function () {
       const hashedPeerId = await consensus.generatePeerId(peerId);
 
       const peerIds = [hashedPeerId];
-      const throughputs = [100];
-      const layers = [2];
-      const total = 200;
+      const contributions = [100];
+      const total = 100;
       const validators = [ownerAddress];
 
 
       const signatures = [await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-        ['bytes32[]', 'uint256[]', 'uint256[]', 'uint256'], [peerIds, throughputs, layers, total]
+        ['bytes32[]', 'uint256[]', 'uint256'], [peerIds, contributions, total]
       )))];
 
       await consensus.setValidator(ownerAddress, true);
@@ -191,7 +190,7 @@ describe('Consensus', function () {
       const lastUpdate = await getCurrentBlockTime();
       await setNextTime(lastUpdate + oneDay);
 
-      await consensus.validateNetworkState(peerIds, throughputs, layers, total, signatures, validators);
+      await consensus.validateNetworkState(peerIds, contributions, total, signatures, validators);
       expect(await consensus.peerBalances(secondAddress)).to.be.gt(0);
     });
 
@@ -200,16 +199,15 @@ describe('Consensus', function () {
       const hashedPeerId = await consensus.generatePeerId(peerId);
 
       const peerIds = [hashedPeerId];
-      const throughputs = [100];
-      const layers = [2, 3];
+      const contributions = [100, 100];
       const total = 200;
       const validators = [ownerAddress];
 
       const signatures = [await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-        ['bytes32[]', 'uint256[]', 'uint256[]', 'uint256'], [peerIds, throughputs, layers, total]
+        ['bytes32[]', 'uint256[]', 'uint256'], [peerIds, contributions, total]
       )))];
 
-      await expect(consensus.validateNetworkState(peerIds, throughputs, layers, total, signatures, validators))
+      await expect(consensus.validateNetworkState(peerIds, contributions, total, signatures, validators))
         .to.be.revertedWith('Data length mismatch');
     });
 
@@ -217,13 +215,12 @@ describe('Consensus', function () {
       const peerId = generatePeerID();
       const hashedPeerId = await consensus.generatePeerId(peerId);
       const peerIds = [hashedPeerId];
-      const throughputs = [100];
-      const layers = [2];
+      const contributions = [200];
       const total = 200;
       const validators = [ownerAddress];
       const signatures: any = [];
 
-      await expect(consensus.validateNetworkState(peerIds, throughputs, layers, total, signatures, validators))
+      await expect(consensus.validateNetworkState(peerIds, contributions, total, signatures, validators))
         .to.be.revertedWith('Signature count mismatch');
     });
 
@@ -231,15 +228,14 @@ describe('Consensus', function () {
       const peerId = generatePeerID();
       const hashedPeerId = await consensus.generatePeerId(peerId);
       const peerIds = [hashedPeerId];
-      const throughputs = [100];
-      const layers = [2];
+      const contributions = [200];
       const total = 200;
       const validators = [ownerAddress];
       const signatures = [await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-        ['bytes32[]', 'uint256[]', 'uint256[]', 'uint256'], [peerIds, throughputs, layers, total]
+        ['bytes32[]', 'uint256[]', 'uint256'], [peerIds, contributions, total]
       )))];
 
-      await expect(consensus.validateNetworkState(peerIds, throughputs, layers, total, signatures, validators))
+      await expect(consensus.validateNetworkState(peerIds, contributions, total, signatures, validators))
         .to.be.revertedWith('No validators');
     });
 
@@ -247,25 +243,100 @@ describe('Consensus', function () {
       const peerId = generatePeerID();
       const hashedPeerId = await consensus.generatePeerId(peerId);
       const peerIds = [hashedPeerId];
-      const throughputs1 = [100];
-      const throughputs2 = [200];
-      const layers = [2];
+      const contributions1 = [100];
+      const contributions2 = [200];
       const total = 200;
       const validators = [ownerAddress, secondAddress];
       const signatures = [
         await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-          ['bytes32[]', 'uint256[]', 'uint256[]', 'uint256'], [peerIds, throughputs1, layers, total]
+          ['bytes32[]', 'uint256[]', 'uint256'], [peerIds, contributions1, total]
         ))),
         await SECOND.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-          ['bytes32[]', 'uint256[]', 'uint256[]', 'uint256'], [peerIds, throughputs2, layers, total]
+          ['bytes32[]', 'uint256[]', 'uint256'], [peerIds, contributions2, total]
         )))
       ];
 
       await consensus.setValidator(ownerAddress, true);
       await consensus.setValidator(secondAddress, true);
 
-      await expect(consensus.validateNetworkState(peerIds, throughputs1, layers, total, signatures, validators))
+      await expect(consensus.validateNetworkState(peerIds, contributions1, total, signatures, validators))
         .to.be.revertedWith('Consensus not reached');
+    });
+
+    it('Should set the correct network state', async function () {
+      const signers = await ethers.getSigners();
+      // first half are validators and the rest are peers
+      const validatorsSigners = signers.slice(0, signers.length * 0.2);
+      const peersSigners = signers.slice(signers.length * 0.2);
+  
+      console.log('signers', validatorsSigners.length, peersSigners.length);
+  
+      const peers = await getDefaultNetworkState(peersSigners.length);
+  
+      const peerIds = await Promise.all(peers.map((x) => consensus.generatePeerId(x.peerId))); // peerId
+      const contributions = peers.map((x) => x.contribution); // contribution
+      const total = peers.reduce((acc, x) => acc + x.contribution, 0); // total contribution
+
+      console.log('peerIds', peerIds);
+      console.log('contributions', contributions);
+      console.log('total', total);
+  
+      const message = ethers.solidityPackedKeccak256(
+        ['bytes32[]', 'uint256[]', 'uint256'],
+        [peerIds, contributions, total],
+      );
+  
+      const signatures = await Promise.all(
+        validatorsSigners.map(async (signer) => {
+          return signer.signMessage(ethers.toBeArray(message));
+        }),
+      );
+  
+      const recoveredSigner = await consensus.testSignature(
+        peerIds,
+        contributions,
+        total,
+        signatures[1],
+        validatorsSigners[1],
+      );
+  
+      expect(recoveredSigner).to.eq(await validatorsSigners[1].getAddress());
+  
+      await Promise.all(
+        peerIds.map(async (peerId, index) => consensus.registerPeer(peerId, peersSigners[index])),
+      );
+  
+      await Promise.all(
+        validatorsSigners.map(async (validator, index) => consensus.setValidator(validator, true)),
+      );
+  
+      const lastUpdate = await getCurrentBlockTime();
+      await setNextTime(lastUpdate + oneDay);
+  
+      const tx = await consensus.validateNetworkState(
+        peerIds,
+        contributions,
+        total,
+        signatures,
+        validatorsSigners,
+      );
+
+//      console.log(tx);
+
+      const receipt = await tx.wait()
+
+      console.log(receipt);
+
+      const balance = await consensus.validatorBalances(SECOND);
+
+      console.log(balance.toString());
+
+      const validatorBalance = await consensus.validatorBalances(validatorsSigners[validatorsSigners.length - 1].address);
+      expect(validatorBalance).to.be.gt(0);
+
+      const peerBalance = await consensus.peerBalances(peersSigners[peersSigners.length - 1].address);
+      expect(peerBalance).to.be.gt(0);
+  
     });
   });
 
@@ -274,12 +345,11 @@ describe('Consensus', function () {
       const peerId = generatePeerID();
       const hashedPeerId = await consensus.generatePeerId(peerId);
       const peerIds = [hashedPeerId];
-      const throughputs = [100];
-      const layers = [2];
+      const contributions = [200];
       const total = 200;
       const validators = [ownerAddress];
       const signatures = [await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-        ['bytes32[]', 'uint256[]', 'uint256[]', 'uint256'], [peerIds, throughputs, layers, total]
+        ['bytes32[]', 'uint256[]', 'uint256'], [peerIds, contributions, total]
       )))];
 
       await consensus.setValidator(ownerAddress, true);
@@ -288,7 +358,7 @@ describe('Consensus', function () {
       const lastUpdate = await getCurrentBlockTime();
       await setNextTime(lastUpdate + oneDay);
 
-      await consensus.validateNetworkState(peerIds, throughputs, layers, total, signatures, validators);
+      await consensus.validateNetworkState(peerIds, contributions, total, signatures, validators);
 
       const initialBalance = await rewardToken.balanceOf(ownerAddress);
 
@@ -317,75 +387,6 @@ describe('Consensus', function () {
       await setNextTime((await getCurrentBlockTime()) + oneDay);
       await expect(consensus.claim(ownerAddress)).to.be.revertedWith('CNS: nothing to claim');
     });
-  });
-
-  it('Should set the correct network state', async function () {
-    const peerId = await consensus.generatePeerId('12D3KooW9tkZQ9721rCog7YScXCES9tFr8m7ViAKKFTRWfH6k5cj');
-
-    const signers = await ethers.getSigners();
-    // first half are validators and the rest are peers
-    const validatorsSigners = signers.slice(0, signers.length / 2);
-    const peersSigners = signers.slice(signers.length / 2);
-
-    console.log('signers', validatorsSigners.length, peersSigners.length);
-
-    const peers = await getDefaultNetworkState(peersSigners.length);
-
-    const peerIds = await Promise.all(peers.map((x) => consensus.generatePeerId(x.peerId))); // peerId
-    const throughputs = peers.map((x) => x.throughput); // throughput
-    const layers = peers.map((x) => x.layers); // layers
-    const total = peers.reduce((acc, x) => acc + x.throughput * x.layers, 0); // total throughput
-
-    const message = ethers.solidityPackedKeccak256(
-      ['bytes32[]', 'uint256[]', 'uint256[]', 'uint256'],
-      [peerIds, throughputs, layers, total],
-    );
-
-    const signatures = await Promise.all(
-      validatorsSigners.map(async (signer) => {
-        return await signer.signMessage(ethers.toBeArray(message));
-      }),
-    );
-
-    const tx = await consensus.testSignature(
-      peerIds,
-      throughputs,
-      layers,
-      total,
-      signatures[7],
-      validatorsSigners[7],
-    );
-
-    console.log(tx, await validatorsSigners[7].getAddress());
-
-    await Promise.all(
-      peerIds.map(async (peerId, index) => {
-        await consensus.registerPeer(peerId, peersSigners[index]);
-      }),
-    );
-
-    await Promise.all(
-      validatorsSigners.map(async (validator, index) => {
-        await consensus.setValidator(validator, true);
-      }),
-    );
-
-    const timestamp = await getCurrentBlockTime();
-
-    await setNextTime(timestamp + 60);
-
-    const a = await consensus.validateNetworkState(
-      peerIds,
-      throughputs,
-      layers,
-      total,
-      signatures,
-      validatorsSigners,
-    );
-
-    const balance = await consensus.validatorBalances(SECOND);
-
-    console.log(balance.toString());
   });
 
   describe('removeUpgradeability', () => {

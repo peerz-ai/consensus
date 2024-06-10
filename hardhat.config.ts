@@ -34,6 +34,9 @@ const config: HardhatUserConfig = {
   },
   networks: {
     hardhat: {
+      accounts: {
+        count: 20,
+      }
     },
     holesky: {
       url: "https://rpc.ankr.com/eth_holesky",
