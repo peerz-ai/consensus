@@ -108,8 +108,22 @@ describe('Distribution', () => {
       lastUpdate = startTime + initialPeriod;
       currentTime = lastUpdate + oneYear; // exactly one year after initial period
       const reward = await lib.calculateAccumulatedDistribution(maxSupply, startTime, lastUpdate, currentTime);
-      const dailyReward = initialDailyReward / BigInt(2) / BigInt(2); // halved after first year
-      const expectedReward = dailyReward * BigInt(365); // one year of rewards after initial period
+      const postInitialReward = initialDailyReward / BigInt(2); // 0 - 1
+      const secondYearReward = postInitialReward / BigInt(2); // 1 - 2
+      const firstYearTime = (BigInt(oneYear) - BigInt(initialPeriod)) / BigInt(oneDay);
+      const secondYearTime = BigInt(365) - firstYearTime;
+      const expectedReward = postInitialReward * firstYearTime + secondYearReward * secondYearTime; // one year of rewards after the initial period
+
+      expect(reward).to.eq(expectedReward);
+    });
+
+    it('should handle accomulation between periods', async () => {
+      const totalTime = 120;
+      lastUpdate = startTime + initialPeriod - totalTime / 2;
+      currentTime = lastUpdate + totalTime;
+      const reward = await lib.calculateAccumulatedDistribution(maxSupply, startTime, lastUpdate, currentTime);
+      const postInitialReward = initialDailyReward / BigInt(2); // 0 - 1
+      const expectedReward = (initialDailyReward * BigInt(totalTime / 2) + postInitialReward * BigInt(totalTime / 2)) / BigInt(oneDay); // 1 minute reward after the initial period
 
       expect(reward).to.eq(expectedReward);
     });

@@ -29,35 +29,35 @@ interface IConsensus {
      * @param peerId The peer's id.
      * @return peerAddress peer's address.
      */
-    function peers(bytes32 peerId) external view returns (address peerAddress);
+    // function peers(bytes32 peerId) external view returns (address peerAddress);
 
     /**
      * The function to get the peer's balance by address.
      * @param peerAddress The peer's address.
      * @return peerBalance peer's balance.
      */
-    function peerBalances(address peerAddress) external view returns (uint256 peerBalance);
+    // function peerBalances(address peerAddress) external view returns (uint256 peerBalance);
 
     /**
      * The function to get the validator existance.
      * @param account The validator address.
      * @return exists The validator existance.
      */
-    function validators(address account) external view returns (bool exists);
+    // function validators(address account) external view returns (bool exists);
 
     /**
      * The function to get the validator's balance.
      * @param account The validator address.
      * @return amount The validator's balance.
      */
-    function validatorBalances(address account) external view returns (uint256 amount);
+    // function validatorBalances(address account) external view returns (uint256 amount);
 
     /**
      * The function to register the peer.
      * @param peerId The peer's id.
      * @param account The peer's address.
      */
-    function registerPeer(bytes32 peerId, address account) external;
+    // function registerPeer(bytes32 peerId, address account) external;
 
     /**
      * The function to update the peer's balance.
@@ -67,17 +67,17 @@ interface IConsensus {
      * @param signatures The validators signatures.
      * @param validators The validators addresses.
      */
-    function validateNetworkState(
+    /* function validateNetworkState(
         bytes32[] calldata peerIds,
         uint256[] calldata contributions,
         uint256 total,
         bytes[] calldata signatures,
         address[] calldata validators
-    ) external;
+    ) external; */
 
     /**
      * The function to claim the rewards.
      * @param receiver The receiver's address.
      */
-    function claim(address receiver) external payable;
+    // function claim(address receiver) external payable;
 }

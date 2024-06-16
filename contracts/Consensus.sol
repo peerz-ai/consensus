@@ -12,6 +12,8 @@ import {Distribution} from "./libs/Distribution.sol";
 import {L2Sender} from "./L2Sender.sol";
 import {IConsensus} from "./interfaces/IConsensus.sol";
 
+import "hardhat/console.sol";
+
 contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
     bool public isNotUpgradeable;
 
@@ -20,14 +22,26 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
     uint256 public rewardStart;
     uint256 public maxSupply;
 
+    uint256 public lastUpdateTime;
+    uint256 public rewardPerContributionStored;
+
+    mapping(bytes32 => uint256) public peerRewardPerContributionPaid;
+    mapping(bytes32 => uint256) public rewards;
+
+    uint256 public totalContributions;
+    mapping(bytes32 => uint256) public contributions;
+
+
     uint256 public constant VALIDATOR_PERCENTAGE = 20;
 
+    bytes32[] public activePeers;
+
     mapping(bytes32 => address) public peers;
-    mapping(address => uint256) public peerBalances;
+    mapping(bytes32 => uint256) public activePeersIndexes;
+
     mapping(address => bool) public validators;
     mapping(address => uint256) public validatorBalances;
 
-    uint256 public lastUpdate;
     address[] internal acceptedValidators;
 
     constructor() {
@@ -60,38 +74,77 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         validators[account] = state;
     }
 
+    function rewardPerContribution() public view returns (uint256) {
+        if (totalContributions == 0) {
+            return rewardPerContributionStored;
+        }
+        uint256 rewardRate = Distribution.calculateAccumulatedDistribution(maxSupply, rewardStart, rewardStart, block.timestamp);
+
+        if (rewardRate == 0) {
+            return rewardPerContributionStored;
+        }
+
+        return
+            rewardPerContributionStored + (block.timestamp - lastUpdateTime) * rewardRate / (block.timestamp - rewardStart) * 1e18 / totalContributions;
+    }
+
+    function earned(bytes32 peerId) public view returns (uint256) {
+
+        return contributions[peerId] * (rewardPerContribution() - peerRewardPerContributionPaid[peerId]) / 1e18 + rewards[peerId];
+    }
+
+
     /**
      * @dev Registers a peer with the given peer ID and account address.
      * @param peerId The unique identifier of the peer.
-     * @param account The Ethereum address associated with the peer.
+     * @param contribution The contribution of the peer.
      */
-    function registerPeer(bytes32 peerId, address account) public {
-        peers[peerId] = account;
-        emit PeerRegistered(peerId, account);
+    function registerPeer(bytes32 peerId, uint256 contribution) external updateReward(peerId) {
+        require(peers[peerId] == address(0), "Peer already registered");
+        require(contribution > 0, "Invalid contribution");
+        // add peer
+        peers[peerId] = msg.sender;
+        contributions[peerId] = contribution;
+        // add to active peers
+        activePeers.push(peerId);
+        activePeersIndexes[peerId] = activePeers.length - 1;
+        // update total contributions
+        totalContributions += contribution;
+        // emit event
+        emit PeerRegistered(peerId, msg.sender);
+    }
+
+    function _deactivatePeer(bytes32 peerId) internal updateReward(peerId) {
+        require(peers[peerId] != address(0), "Peer not registered");
+        // update total contributions
+        totalContributions -= contributions[peerId];
+        contributions[peerId] = 0;
+        // remove from active peers
+        bytes32 lastActivePeerId = activePeers[activePeers.length - 1];
+        activePeers[activePeersIndexes[peerId]] = lastActivePeerId;
+        activePeersIndexes[lastActivePeerId] = activePeersIndexes[peerId];
+        delete activePeersIndexes[peerId];
+        activePeers.pop();
+        // emit PeerDeactivated(peerId);
+    }
+
+    function deactivatePeer(bytes32 peerId) public onlyPeer(peerId) {
+        _deactivatePeer(peerId);
     }
 
     /**
-     * @dev Validates the network state by checking the consensus among validators.
-     * @param peerIds The array of peer IDs.
-     * @param contributions The array of contributions corresponding to each peer.
-     * @param total The total value used for calculating balances.
-     * @param signatures The array of signatures provided by validators.
-     * @param validators_ The array of validator addresses.
-     * Requirements:
-     * - The lengths of `peerIds` and `contributions` arrays must be equal.
-     * - The length of `signatures` array must be equal to the length of `validators` array.
-     * - At least 66% consensus must be reached among validators.
-     * - If consensus is reached, balances are updated according to contributions.
+     * @dev Deactivates a peer with the given peer ID.
+     * @param peerId The unique identifier of the peer.
      */
-    function validateNetworkState(
-        bytes32[] calldata peerIds,
-        uint256[] calldata contributions,
-        uint256 total,
+    function reportPeer(
         bytes[] calldata signatures,
-        address[] calldata validators_
+        address[] calldata validators_,
+        bytes32 peerId
     ) public {
-        require(peerIds.length == contributions.length, "Data length mismatch");
         require(signatures.length == validators_.length, "Signature count mismatch");
+        // require peer is active
+        require(activePeers.length > activePeersIndexes[peerId], "Peer not active");
+        require(peerId == activePeers[activePeersIndexes[peerId]], "Peer not active");
 
         acceptedValidators = new address[](0);
 
@@ -100,7 +153,7 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         bytes32 dataHash = keccak256(
             abi.encodePacked(
                 "\x19Ethereum Signed Message:\n32",
-                keccak256(abi.encodePacked(peerIds, contributions, total))
+                keccak256(abi.encodePacked(peerId))
             )
         );
 
@@ -119,39 +172,15 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         // Ensure at least 66% consensus
         require((_acceptedValidators.length * 100) / totalValidators >= 66, "Consensus not reached");
 
-        // period reward
-        uint256 periodReward = Distribution.calculateAccumulatedDistribution(
-            maxSupply,
-            rewardStart,
-            lastUpdate,
-            block.timestamp
-        );
+        // Deactivate peer
+        _deactivatePeer(peerId);
 
-        // update last update
-        lastUpdate = block.timestamp;
+        // Distribute rewards
+        rewards[peerId] = earned(peerId);
 
-        uint256 peersReward = periodReward * (100 - VALIDATOR_PERCENTAGE) / 100;
-
-        // Distributes rewards to peers based on their contribution.
-        for (uint256 i = 0; i < peerIds.length; i++) {
-            bytes32 peerId = peerIds[i];
-            address peer = peers[peerId];
-            uint256 contribution = contributions[i];
-            if (peer == address(0)) {
-                // peer not registered
-                total -= contribution;
-                continue;
-            }
-            // update balance
-            uint256 balance = (contribution * peersReward) / total;
-            // update peer balance
-            peerBalances[peer] += balance;
-            // emit event
-            emit BalancesUpdated(peer, balance);
-        }
-
-        // Distributes rewards to validators based on their contribution.
-        uint256 validatorsReward = periodReward - peersReward;
+        // slashing
+        uint256 validatorsReward = rewards[peerId] * VALIDATOR_PERCENTAGE / 100;
+        rewards[peerId] = rewards[peerId] - validatorsReward;
 
         uint256 validatorReward = validatorsReward / _acceptedValidators.length;
         for (uint256 i = 0; i < _acceptedValidators.length; i++) {
@@ -164,14 +193,19 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
 
     /**
      * @dev Allows a user to claim their pending rewards.
-     * @param receiver_ The address where the rewards will be sent.
+     * @param peerId The unique identifier of the peer.
      */
-    function claim(address receiver_) external payable {
-        address user_ = _msgSender();
-
+    function claim(bytes32 peerId) public payable updateReward(peerId) {
         require(block.timestamp > rewardStart, "CNS: rewards not started yet");
 
-        uint256 pendingPeerRewards_ = peerBalances[user_];
+        uint256 reward = rewards[peerId];
+        if (reward > 0) {
+            rewards[peerId] = 0;
+            L2Sender(l2Sender).sendMintMessage{value: msg.value}(peers[peerId], reward, msg.sender);
+            // emit RewardPaid(peers[peerId], reward);
+        }
+
+        /* uint256 pendingPeerRewards_ = peerBalances[user_];
         uint256 pendingValidatorRewards_ = validatorBalances[user_];
         require(pendingPeerRewards_ > 0 || pendingValidatorRewards_ > 0, "CNS: nothing to claim");
 
@@ -184,7 +218,7 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         // mint rewards
         L2Sender(l2Sender).sendMintMessage{value: msg.value}(receiver_, pendingRewards_, user_);
 
-        emit UserClaimed(user_, receiver_, pendingRewards_);
+        emit UserClaimed(user_, receiver_, pendingRewards_); */
     }
 
     function generatePeerId(string calldata peerId) public pure returns (bytes32) {
@@ -203,37 +237,20 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         require(!isNotUpgradeable, "CNS: upgrade isn't available");
     }
 
-    /* function pause() public onlyOwner {
-        _pause();
+    /* ========== MODIFIERS ========== */
+
+    modifier updateReward(bytes32 peerId) {
+        rewardPerContributionStored = rewardPerContribution();
+        lastUpdateTime = block.timestamp > rewardStart ? block.timestamp : rewardStart;
+        if (peerId != bytes32("0x")) {
+            rewards[peerId] = earned(peerId);
+            peerRewardPerContributionPaid[peerId] = rewardPerContributionStored;
+        }
+        _;
     }
 
-    function unpause() public onlyOwner {
-        _unpause();
-    }
-
-    function withdrawAll() public onlyOwner {
-        payable(owner()).transfer(address(this).balance);
-    }
-
-    function withdrawERC20(address tokenAddress) public onlyOwner {
-        IERC20 token = IERC20(tokenAddress);
-        token.transfer(owner(), token.balanceOf(address(this)));
-    } */
-
-    function testSignature(
-        bytes32[] calldata peerIds,
-        uint256[] calldata contributions,
-        uint256 total,
-        bytes calldata signature,
-        address account
-    ) public pure returns (address) {
-        bytes32 dataHash = keccak256(
-            abi.encodePacked(
-                "\x19Ethereum Signed Message:\n32",
-                keccak256(abi.encodePacked(peerIds, contributions, total))
-            )
-        );
-
-        return ECDSA.recover(dataHash, signature);
+    modifier onlyPeer(bytes32 peerId) {
+        require(peers[peerId] == msg.sender, "CNS: not the peer address");
+        _;
     }
 }
