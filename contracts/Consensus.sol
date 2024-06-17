@@ -40,7 +40,7 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
     mapping(bytes32 => uint256) public activePeersIndexes;
 
     mapping(address => bool) public validators;
-    mapping(address => uint256) public validatorBalances;
+    mapping(address => uint256) public validatorRewards;
 
     address[] internal acceptedValidators;
 
@@ -78,18 +78,15 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         if (totalContributions == 0) {
             return rewardPerContributionStored;
         }
-        uint256 rewardRate = Distribution.calculateAccumulatedDistribution(maxSupply, rewardStart, rewardStart, block.timestamp);
-
-        if (rewardRate == 0) {
+        uint256 totalRewards = Distribution.calculateAccumulatedDistribution(maxSupply, rewardStart, lastUpdateTime, block.timestamp);
+        if (totalRewards == 0) {
             return rewardPerContributionStored;
         }
-
-        return
-            rewardPerContributionStored + (block.timestamp - lastUpdateTime) * rewardRate / (block.timestamp - rewardStart) * 1e18 / totalContributions;
+        return rewardPerContributionStored + totalRewards * 1e18 / totalContributions;
     }
 
-    function earned(bytes32 peerId) public view returns (uint256) {
 
+    function earned(bytes32 peerId) public view returns (uint256) {
         return contributions[peerId] * (rewardPerContribution() - peerRewardPerContributionPaid[peerId]) / 1e18 + rewards[peerId];
     }
 
@@ -114,6 +111,25 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         emit PeerRegistered(peerId, msg.sender);
     }
 
+    function updatePeerContribution(bytes32 peerId, uint256 contribution) external updateReward(peerId) onlyPeer(peerId) {
+        require(contribution > 0, "CNS: invalid contribution");
+
+        totalContributions = totalContributions - contributions[peerId] + contribution;
+        contributions[peerId] = contribution;
+
+        emit PeerContributionUpdated(peerId, contribution);
+    }
+
+    function updatePeerAddress(bytes32 peerId, address newAddress) external updateReward(peerId) onlyPeer(peerId) {
+        peers[peerId] = newAddress;
+
+        emit PeerAddressUpdated(peerId, newAddress);
+    }
+
+    function getActivePeers() external view returns (bytes32[] memory) {
+        return activePeers;
+    }
+
     function _deactivatePeer(bytes32 peerId) internal updateReward(peerId) {
         require(peers[peerId] != address(0), "Peer not registered");
         // update total contributions
@@ -125,7 +141,8 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         activePeersIndexes[lastActivePeerId] = activePeersIndexes[peerId];
         delete activePeersIndexes[peerId];
         activePeers.pop();
-        // emit PeerDeactivated(peerId);
+        
+        emit PeerDeactivated(peerId);
     }
 
     function deactivatePeer(bytes32 peerId) public onlyPeer(peerId) {
@@ -185,7 +202,7 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         uint256 validatorReward = validatorsReward / _acceptedValidators.length;
         for (uint256 i = 0; i < _acceptedValidators.length; i++) {
             address validator = _acceptedValidators[i];
-            validatorBalances[validator] += validatorReward;
+            validatorRewards[validator] += validatorReward;
             // emit event
             emit BalancesUpdated(validator, validatorReward);
         }
@@ -193,36 +210,24 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
 
     /**
      * @dev Allows a user to claim their pending rewards.
-     * @param peerId The unique identifier of the peer.
+     * @param peerId The unique identifier of the peer. (0x for validators)
      */
     function claim(bytes32 peerId) public payable updateReward(peerId) {
         require(block.timestamp > rewardStart, "CNS: rewards not started yet");
 
-        uint256 reward = rewards[peerId];
-        if (reward > 0) {
+        if (peerId != bytes32("")) {
+            uint256 reward = rewards[peerId];
+            require(reward > 0, "CNS: nothing to claim");
             rewards[peerId] = 0;
             L2Sender(l2Sender).sendMintMessage{value: msg.value}(peers[peerId], reward, msg.sender);
-            // emit RewardPaid(peers[peerId], reward);
+            emit UserClaimed(peers[peerId], msg.sender, reward);
+        } else {
+            uint256 validatorReward = validatorRewards[msg.sender];
+            require(validatorReward > 0, "CNS: nothing to claim");
+            validatorRewards[msg.sender] = 0;
+            L2Sender(l2Sender).sendMintMessage{value: msg.value}(msg.sender, validatorReward, msg.sender);
+            emit UserClaimed(msg.sender, msg.sender, validatorReward);
         }
-
-        /* uint256 pendingPeerRewards_ = peerBalances[user_];
-        uint256 pendingValidatorRewards_ = validatorBalances[user_];
-        require(pendingPeerRewards_ > 0 || pendingValidatorRewards_ > 0, "CNS: nothing to claim");
-
-        // Update user data
-        peerBalances[user_] = 0;
-        validatorBalances[user_] = 0;
-
-        uint256 pendingRewards_ = pendingPeerRewards_ + pendingValidatorRewards_;
-        
-        // mint rewards
-        L2Sender(l2Sender).sendMintMessage{value: msg.value}(receiver_, pendingRewards_, user_);
-
-        emit UserClaimed(user_, receiver_, pendingRewards_); */
-    }
-
-    function generatePeerId(string calldata peerId) public pure returns (bytes32) {
-        return keccak256(abi.encodePacked(peerId));
     }
 
     /**********************************************************************************************/
@@ -242,7 +247,7 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
     modifier updateReward(bytes32 peerId) {
         rewardPerContributionStored = rewardPerContribution();
         lastUpdateTime = block.timestamp > rewardStart ? block.timestamp : rewardStart;
-        if (peerId != bytes32("0x")) {
+        if (peerId != bytes32("")) {
             rewards[peerId] = earned(peerId);
             peerRewardPerContributionPaid[peerId] = rewardPerContributionStored;
         }

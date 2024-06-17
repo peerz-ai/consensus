@@ -1,4 +1,5 @@
 import bs58 from 'bs58';
+import { ethers } from 'hardhat';
 import forge from 'node-forge';
 
 type NetworkState = {
@@ -33,5 +34,6 @@ export const generatePeerID = () => {
   const bytes = Buffer.from(digest, 'binary');
   const base58ID = '12D' + bs58.encode(bytes); // The '12D' prefix is an arbitrary choice for demonstration
 
-  return base58ID;
+  // return keccak256(abi.encodePacked(peerId));
+  return ethers.solidityPackedKeccak256(['string'], [base58ID]);
 };

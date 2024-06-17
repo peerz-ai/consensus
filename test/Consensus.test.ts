@@ -16,8 +16,8 @@ import {
   PRZ,
 } from '@/generated-types/ethers';
 import { ZERO_ADDR } from '@/scripts/utils/constants';
-import { wei } from '@/scripts/utils/utils';
-import { getCurrentBlockTime, setNextTime } from '@/test/helpers/block-helper';
+import { fromWei, wei } from '@/scripts/utils/utils';
+import { getCurrentBlockTime, setTime } from '@/test/helpers/block-helper';
 import { Reverter } from '@/test/helpers/reverter';
 
 export const oneDay = 86400;
@@ -163,151 +163,218 @@ describe('Consensus', function () {
   describe('registerPeer', () => {
     it('should register a peer', async () => {
       const peerId = generatePeerID();
-      const hashedPeerId = await consensus.generatePeerId(peerId);
-      await consensus.connect(SECOND).registerPeer(hashedPeerId, 250);
-      expect(await consensus.peers(hashedPeerId)).to.equal(secondAddress);
-      expect(await consensus.contributions(hashedPeerId)).to.equal(250);
+      await consensus.connect(SECOND).registerPeer(peerId, 250);
+      expect(await consensus.peers(peerId)).to.equal(secondAddress);
+      expect(await consensus.contributions(peerId)).to.equal(250);
       expect(await consensus.totalContributions()).to.equal(250);
+    });
+    it('should revert if contribution is zero', async () => {
+      const peerId = generatePeerID();
+      await expect(consensus.connect(SECOND).registerPeer(peerId, 0)).to.be.revertedWith("Invalid contribution");
+    });
+
+    it('should revert if peer is already registered', async () => {
+      const peerId = generatePeerID();
+      await consensus.connect(SECOND).registerPeer(peerId, 250);
+      await expect(consensus.connect(SECOND).registerPeer(peerId, 250)).to.be.revertedWith("Peer already registered");
+    });
+
+    it('should register multiple peers and update total contributions', async () => {
+      const peerId1 = generatePeerID();
+      const peerId2 = generatePeerID();
+      await consensus.connect(SECOND).registerPeer(peerId1, 250);
+      await consensus.connect(SECOND).registerPeer(peerId2, 300);
+      expect(await consensus.totalContributions()).to.equal(550);
     });
   });
 
-  describe('validateNetworkState', () => {
+  describe('updatePeerContribution', () => {
+    it('should update peer contribution', async () => {
+      const peerId = generatePeerID();
+      await consensus.connect(SECOND).registerPeer(peerId, 250);
+      await consensus.connect(SECOND).updatePeerContribution(peerId, 500);
+      expect(await consensus.contributions(peerId)).to.equal(500);
+      expect(await consensus.totalContributions()).to.equal(500);
+    });
+
+    it('should revert if not called by peer', async () => {
+      const peerId = generatePeerID();
+      await consensus.connect(SECOND).registerPeer(peerId, 250);
+      await expect(consensus.updatePeerContribution(peerId, 500)).to.be.revertedWith("CNS: not the peer address");
+    });
+
+    it('should revert if contribution is zero', async () => {
+      const peerId = generatePeerID();
+      await consensus.connect(SECOND).registerPeer(peerId, 250);
+      await expect(consensus.connect(SECOND).updatePeerContribution(peerId, 0)).to.be.revertedWith("CNS: invalid contribution");
+    });
+  });
+
+  describe('updatePeerAddress', () => {
+    it('should update peer address', async () => {
+      const peerId = generatePeerID();
+      await consensus.connect(SECOND).registerPeer(peerId, 250);
+      await consensus.connect(SECOND).updatePeerAddress(peerId, ownerAddress);
+      expect(await consensus.peers(peerId)).to.equal(ownerAddress);
+    });
+
+    it('should revert if not called by peer', async () => {
+      const peerId = generatePeerID();
+      await consensus.connect(SECOND).registerPeer(peerId, 250);
+      await expect(consensus.updatePeerAddress(peerId, ownerAddress)).to.be.revertedWith("CNS: not the peer address");
+    });
+  });
+
+  describe('deactivatePeer', () => {
+    it('should deactivate a peer', async () => {
+      const peerId = generatePeerID();
+      await consensus.connect(SECOND).registerPeer(peerId, 250);
+      await consensus.connect(SECOND).deactivatePeer(peerId);
+      expect(await consensus.contributions(peerId)).to.equal(0);
+      expect(await consensus.totalContributions()).to.equal(0);
+    });
+
+    it('should revert if not called by peer', async () => {
+      const peerId = generatePeerID();
+      await consensus.connect(SECOND).registerPeer(peerId, 250);
+      await expect(consensus.deactivatePeer(peerId)).to.be.revertedWith("CNS: not the peer address");
+    });
+
+    it('should revert if peer is not registered', async () => {
+      const peerId = generatePeerID();
+      await expect(consensus.connect(SECOND).deactivatePeer(peerId)).to.be.revertedWith("CNS: not the peer address");
+    });
+  });
+
+
+  describe('validate', () => {
     it('should validate 20% distributed the first 90 days', async () => {
       const peerId = generatePeerID();
-      const hashedPeerId = await consensus.generatePeerId(peerId);
 
-      await consensus.connect(SECOND).registerPeer(hashedPeerId, 250);
+      await consensus.connect(SECOND).registerPeer(peerId, 250);
 
       const lastUpdate = await consensus.rewardStart() + BigInt(oneDay * 90);
-      await setNextTime(Number(lastUpdate));
+      await setTime(Number(lastUpdate) - 1);
 
-      await consensus.connect(SECOND).deactivatePeer(hashedPeerId);
+      await consensus.connect(SECOND).deactivatePeer(peerId);
 
       const initialDailyReward = await rewardToken.cap() * BigInt(20) / BigInt(100) / BigInt(90);
 
-      expect(await consensus.rewards(hashedPeerId)).to.be.equal(initialDailyReward * BigInt(90));
+      expect(await consensus.rewards(peerId)).to.be.equal(initialDailyReward * BigInt(90));
     });
 
     it('should validate network state and update balances', async () => {
       const peerId = generatePeerID();
-      const hashedPeerId = await consensus.generatePeerId(peerId);
 
       const validators = [ownerAddress];
 
       const signatures = [await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-        ['bytes32'], [hashedPeerId]
+        ['bytes32'], [peerId]
       )))];
 
       await consensus.setValidator(ownerAddress, true);
-      await consensus.connect(SECOND).registerPeer(hashedPeerId, 250);
+      await consensus.connect(SECOND).registerPeer(peerId, 250);
 
       const lastUpdate = await getCurrentBlockTime();
-      await setNextTime(lastUpdate + oneDay);
+      await setTime(lastUpdate + oneDay);
 
-      await consensus.reportPeer(signatures, validators, hashedPeerId);
-      expect(await consensus.rewards(hashedPeerId)).to.be.gt(0);
+      await consensus.reportPeer(signatures, validators, peerId);
+      expect(await consensus.rewards(peerId)).to.be.gt(0);
     });
 
     it('should revert if not the peer address trying to deactivate', async () => {
       const peerId = generatePeerID();
-      const hashedPeerId = await consensus.generatePeerId(peerId);
 
-      await consensus.connect(SECOND).registerPeer(hashedPeerId, 250);
+      await consensus.connect(SECOND).registerPeer(peerId, 250);
 
       const lastUpdate = await consensus.rewardStart() + BigInt(oneDay * 90);
-      await setNextTime(Number(lastUpdate));
+      await setTime(Number(lastUpdate));
 
-      await expect(consensus.deactivatePeer(hashedPeerId))
+      await expect(consensus.deactivatePeer(peerId))
         .to.be.revertedWith('CNS: not the peer address');
     });
 
     it('should revert if signature count mismatch', async () => {
       const peerId = generatePeerID();
-      const hashedPeerId = await consensus.generatePeerId(peerId);
       const validators = [ownerAddress];
       const signatures = [
         await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-          ['bytes32'], [hashedPeerId]
+          ['bytes32'], [peerId]
         ))),
         await SECOND.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-          ['bytes32'], [hashedPeerId]
+          ['bytes32'], [peerId]
         )))
       ];
 
-      await expect(consensus.reportPeer(signatures, validators, hashedPeerId))
+      await expect(consensus.reportPeer(signatures, validators, peerId))
         .to.be.revertedWith('Signature count mismatch');
     });
 
     it('should revert if no validators', async () => {
       const peerId = generatePeerID();
-      const hashedPeerId = await consensus.generatePeerId(peerId);
-      await consensus.connect(SECOND).registerPeer(hashedPeerId, 250);
+      await consensus.connect(SECOND).registerPeer(peerId, 250);
       const validators = [ownerAddress];
       const signatures = [await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-        ['bytes32'], [hashedPeerId]
+        ['bytes32'], [peerId]
       )))];
 
-      await expect(consensus.reportPeer(signatures, validators, hashedPeerId))
+      await expect(consensus.reportPeer(signatures, validators, peerId))
         .to.be.revertedWith('No validators');
     });
 
     it('should revert if peer is not active', async () => {
       const peerId = generatePeerID();
-      const hashedPeerId = await consensus.generatePeerId(peerId);
       const validators = [ownerAddress];
       const signatures = [
         await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-          ['bytes32'], [hashedPeerId]
+          ['bytes32'], [peerId]
         ))),
       ];
 
       await consensus.setValidator(ownerAddress, true);
 
-      await expect(consensus.reportPeer(signatures, validators, hashedPeerId))
+      await expect(consensus.reportPeer(signatures, validators, peerId))
         .to.be.revertedWith('Peer not active');
     });
 
     it('should revert if peer is not active', async () => {
       const peerId = generatePeerID();
-      const hashedPeerId = await consensus.generatePeerId(peerId);
 
-      await consensus.connect(SECOND).registerPeer(await consensus.generatePeerId(generatePeerID()), 20);
+      await consensus.connect(SECOND).registerPeer(generatePeerID(), 20);
 
       const validators = [ownerAddress];
       const signatures = [
         await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-          ['bytes32'], [hashedPeerId]
+          ['bytes32'], [peerId]
         ))),
       ];
 
       await consensus.setValidator(ownerAddress, true);
 
-      await expect(consensus.reportPeer(signatures, validators, hashedPeerId))
+      await expect(consensus.reportPeer(signatures, validators, peerId))
         .to.be.revertedWith('Peer not active');
     });
 
     it('should revert if consensus is not reached', async () => {
       const peerId = generatePeerID();
       const peerId2 = generatePeerID();
-      const hashedPeerId = await consensus.generatePeerId(peerId);
-      const hashedPeerId2 = await consensus.generatePeerId(peerId2);
 
-      await consensus.connect(SECOND).registerPeer(hashedPeerId, 20);
+      await consensus.connect(SECOND).registerPeer(peerId, 20);
 
       const validators = [ownerAddress, secondAddress];
       const signatures = [
         await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-          ['bytes32'], [hashedPeerId]
+          ['bytes32'], [peerId]
         ))),
         await SECOND.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-          ['bytes32'], [hashedPeerId2]
+          ['bytes32'], [peerId2]
         )))
       ];
 
       await consensus.setValidator(ownerAddress, true);
       await consensus.setValidator(secondAddress, true);
 
-      await expect(consensus.reportPeer(signatures, validators, hashedPeerId))
+      await expect(consensus.reportPeer(signatures, validators, peerId))
         .to.be.revertedWith('Consensus not reached');
     });
 
@@ -317,11 +384,9 @@ describe('Consensus', function () {
       const validatorsSigners = signers.slice(0, signers.length * 0.2);
       const peersSigners = signers.slice(signers.length * 0.2);
   
-      console.log('signers', validatorsSigners.length, peersSigners.length);
-  
       const peers = await getDefaultNetworkState(peersSigners.length);
   
-      const peerIds = await Promise.all(peers.map((x) => consensus.generatePeerId(x.peerId))); // peerId
+      const peerIds = await Promise.all(peers.map((x) => x.peerId)); // peerId
       const contributions = peers.map((x) => x.contribution); // contribution
   
       const message = ethers.solidityPackedKeccak256(
@@ -344,7 +409,7 @@ describe('Consensus', function () {
       );
   
       const lastUpdate = await getCurrentBlockTime();
-      await setNextTime(lastUpdate + oneDay);
+      await setTime(lastUpdate + oneDay);
   
       const tx = await consensus.reportPeer(
         signatures,
@@ -354,11 +419,9 @@ describe('Consensus', function () {
 
       await tx.wait();
 
-      const balance = await consensus.validatorBalances(SECOND);
+      const balance = await consensus.validatorRewards(SECOND);
 
-      console.log(balance.toString());
-
-      const validatorBalance = await consensus.validatorBalances(validatorsSigners[validatorsSigners.length - 1].address);
+      const validatorBalance = await consensus.validatorRewards(validatorsSigners[validatorsSigners.length - 1].address);
       expect(validatorBalance).to.be.gt(0);
 
       const peerBalance = await consensus.rewards(peerIds[0]);
@@ -368,24 +431,14 @@ describe('Consensus', function () {
   });
 
   describe('claim', () => {
-    /* it('should allow user to claim rewards', async () => {
+    it('should allow user to claim rewards', async () => {
       const peerId = generatePeerID();
-      const hashedPeerId = await consensus.generatePeerId(peerId);
-      const peerIds = [hashedPeerId];
-      const contributions = [200];
-      const total = 200;
-      const validators = [ownerAddress];
-      const signatures = [await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-        ['bytes32[]', 'uint256[]', 'uint256'], [peerIds, contributions, total]
-      )))];
 
       await consensus.setValidator(ownerAddress, true);
-      await consensus.registerPeer(peerIds[0], ownerAddress);
+      await consensus.registerPeer(peerId, 250);
 
       const lastUpdate = await getCurrentBlockTime();
-      await setNextTime(lastUpdate + oneDay);
-
-      await consensus.validateNetworkState(peerIds, contributions, total, signatures, validators);
+      await setTime(lastUpdate + oneDay);
 
       const initialBalance = await rewardToken.balanceOf(ownerAddress);
 
@@ -399,7 +452,35 @@ describe('Consensus', function () {
         '0x'
       );
 
-      await consensus.claim(ownerAddress, {value: estimatedFees[0]});
+      await consensus.claim(peerId, {value: estimatedFees[0]});
+
+      const finalBalance = await rewardToken.balanceOf(ownerAddress);
+
+      expect(finalBalance).to.be.gt(initialBalance);
+    });
+
+    it('should allow validators to claim their rewards', async () => {
+      const peerId = generatePeerID();
+
+      await consensus.setValidator(ownerAddress, true);
+      await consensus.registerPeer(peerId, 250);
+
+      const lastUpdate = await getCurrentBlockTime();
+      await setTime(lastUpdate + oneDay);
+
+      const initialBalance = await rewardToken.balanceOf(ownerAddress);
+
+      const mintPayload = rewardToken.interface.encodeFunctionData('mint', [ownerAddress, wei(100)]);
+
+      const estimatedFees = await lZEndpointMockReceiver.estimateFees(
+        receiverChainId,
+        await rewardToken.getAddress(),
+        mintPayload,
+        false,
+        '0x'
+      );
+
+      await consensus.claim(peerId, {value: estimatedFees[0]});
 
       const finalBalance = await rewardToken.balanceOf(ownerAddress);
 
@@ -407,14 +488,414 @@ describe('Consensus', function () {
     });
 
     it('should revert if rewards not started yet', async () => {
-      await expect(consensus.claim(ownerAddress)).to.be.revertedWith('CNS: rewards not started yet');
+      const peerId = generatePeerID();
+
+      await expect(consensus.claim(peerId)).to.be.revertedWith('CNS: rewards not started yet');
     });
 
     it('should revert if nothing to claim', async () => {
-      await setNextTime((await getCurrentBlockTime()) + oneDay);
-      await expect(consensus.claim(ownerAddress)).to.be.revertedWith('CNS: nothing to claim');
-    }); */
+      const peerId = generatePeerID();
+
+      await setTime((await getCurrentBlockTime()) + oneDay);
+      await expect(consensus.claim(peerId)).to.be.revertedWith('CNS: nothing to claim');
+    });
+
+    it('should revert if not enough to pay lz fees', async () => {
+      const peerId = generatePeerID();
+
+      await consensus.setValidator(ownerAddress, true);
+      await consensus.registerPeer(peerId, 250);
+
+      const lastUpdate = await getCurrentBlockTime();
+      await setTime(lastUpdate + oneDay);
+
+      await expect(consensus.claim(peerId)).to.be.revertedWith("LayerZeroMock: not enough native for fees");
+    });
   });
+
+  describe('Consensus Integration Tests', function () {
+    it('should handle multiple peers joining and deactivating at different times', async () => {
+        const peerId1 = generatePeerID();
+        const peerId2 = generatePeerID();
+        const peerId3 = generatePeerID();
+
+        // Peer 1 joins
+        await consensus.connect(SECOND).registerPeer(peerId1, 250);
+        expect(await consensus.totalContributions()).to.equal(250);
+
+        // Advance time by one day
+        const lastUpdate = await getCurrentBlockTime();
+        await setTime(lastUpdate + oneDay);
+
+        // Peer 2 joins
+        await consensus.connect(SECOND).registerPeer(peerId2, 300);
+        expect(await consensus.totalContributions()).to.equal(550);
+
+        // Advance time by another day
+        await setTime(lastUpdate + oneDay * 2);
+
+        // Peer 1 deactivates
+        await consensus.connect(SECOND).deactivatePeer(peerId1);
+        expect(await consensus.totalContributions()).to.equal(300);
+        expect(await consensus.contributions(peerId1)).to.equal(0);
+
+        // Peer 3 joins
+        await consensus.connect(SECOND).registerPeer(peerId3, 400);
+        expect(await consensus.totalContributions()).to.equal(700);
+
+        // Advance time by another day
+        await setTime(lastUpdate + oneDay * 3);
+
+        // Peer 2 deactivates
+        await consensus.connect(SECOND).deactivatePeer(peerId2);
+        expect(await consensus.totalContributions()).to.equal(400);
+        expect(await consensus.contributions(peerId2)).to.equal(0);
+    });
+
+    it('should handle peers getting reported and validators receiving rewards', async () => {
+        const peerId1 = generatePeerID();
+        const peerId2 = generatePeerID();
+
+        await consensus.setValidator(ownerAddress, true);
+
+        // Peers join
+        await consensus.connect(SECOND).registerPeer(peerId1, 250);
+        await consensus.connect(SECOND).registerPeer(peerId2, 300);
+
+        const lastUpdate = await getCurrentBlockTime();
+        await setTime(lastUpdate + oneDay);
+
+        const initialBalance = await rewardToken.balanceOf(ownerAddress);
+
+        const mintPayload = rewardToken.interface.encodeFunctionData('mint', [ownerAddress, wei(100)]);
+        const estimatedFees = await lZEndpointMockReceiver.estimateFees(
+            receiverChainId,
+            await rewardToken.getAddress(),
+            mintPayload,
+            false,
+            '0x'
+        );
+
+        const signatures = [
+            await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(['bytes32'], [peerId1]))),
+        ];
+        const validators = [ownerAddress];
+
+        // Report Peer 1
+        await consensus.reportPeer(signatures, validators, peerId1);
+
+        const validatorReward = await consensus.validatorRewards(ownerAddress);
+        expect(validatorReward).to.be.gt(0);
+
+        await consensus.claim(peerId1, {value: estimatedFees[0]});
+        await consensus.claim(ethers.encodeBytes32String(""), {value: estimatedFees[0]});
+
+        const finalBalance = await rewardToken.balanceOf(ownerAddress);
+        expect(finalBalance).to.be.gt(initialBalance);
+
+        const peer1Balance = await consensus.earned(peerId1);
+        expect(peer1Balance).to.equal(0);
+
+        const peer2Balance = await consensus.earned(peerId2);
+        expect(peer2Balance).to.be.gt(0);
+    });
+
+    it('should distribute rewards correctly among multiple peers and validators', async () => {
+        const peerId1 = generatePeerID();
+        const peerId2 = generatePeerID();
+        const peerId3 = generatePeerID();
+
+        await consensus.setValidator(ownerAddress, true);
+        await consensus.setValidator(secondAddress, true);
+
+        // Peers join
+        await consensus.connect(SECOND).registerPeer(peerId1, 250);
+        await consensus.connect(SECOND).registerPeer(peerId2, 300);
+        await consensus.connect(SECOND).registerPeer(peerId3, 200);
+
+        const lastUpdate = await getCurrentBlockTime();
+        await setTime(lastUpdate + oneDay);
+
+        const signatures = [
+            await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(['bytes32'], [peerId1]))),
+            await SECOND.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(['bytes32'], [peerId1]))),
+        ];
+        const validators = [ownerAddress, secondAddress];
+
+        // Report Peer 1
+        await consensus.reportPeer(signatures, validators, peerId1);
+
+        const validatorRewardOwner = await consensus.validatorRewards(ownerAddress);
+        const validatorRewardSecond = await consensus.validatorRewards(secondAddress);
+        expect(validatorRewardOwner).to.be.gt(0);
+        expect(validatorRewardSecond).to.be.gt(0);
+
+        const peer1Rewards = await consensus.earned(peerId1);
+        expect(peer1Rewards).to.be.gt(0);
+
+        const peer3Rewards = await consensus.earned(peerId3);
+
+        // Claim rewards
+        const mintPayload = rewardToken.interface.encodeFunctionData('mint', [ownerAddress, wei(100)]);
+        const estimatedFees = await lZEndpointMockReceiver.estimateFees(
+            receiverChainId,
+            await rewardToken.getAddress(),
+            mintPayload,
+            false,
+            '0x'
+        );
+
+        await consensus.claim(peerId1, {value: estimatedFees[0]});
+        await consensus.claim(peerId2, {value: estimatedFees[0]});
+        await consensus.claim(peerId3, {value: estimatedFees[0]});
+
+        await setTime(await getCurrentBlockTime() + oneDay);
+
+        // Check final balances
+        const finalBalanceOwner = await rewardToken.balanceOf(ownerAddress);
+        const finalBalanceSecond = await rewardToken.balanceOf(secondAddress);
+
+        expect(finalBalanceOwner).to.eq(0);
+        expect(finalBalanceSecond).to.be.gt(0);
+
+        const finalPeer1Balance = await consensus.earned(peerId1);
+        const finalPeer2Balance = await consensus.earned(peerId2);
+        const finalPeer3Balance = await consensus.earned(peerId3);
+
+        expect(finalPeer1Balance).to.equal(0);
+        expect(finalPeer2Balance).to.be.gt(0);
+        expect(finalPeer3Balance).to.be.gt(0);
+    });
+
+    it('should handle complex scenario with multiple peers and validators', async () => {
+        const peerId1 = generatePeerID();
+        const peerId2 = generatePeerID();
+        const peerId3 = generatePeerID();
+        const peerId4 = generatePeerID();
+
+        await consensus.setValidator(ownerAddress, true);
+        await consensus.setValidator(secondAddress, true);
+
+        // Peers join
+        await consensus.connect(SECOND).registerPeer(peerId1, 250);
+        await consensus.connect(SECOND).registerPeer(peerId2, 300);
+        await consensus.connect(SECOND).registerPeer(peerId3, 200);
+        await consensus.connect(SECOND).registerPeer(peerId4, 150);
+
+        const lastUpdate = await getCurrentBlockTime();
+        await setTime(lastUpdate + oneDay);
+
+        // Peer 2 deactivates
+        await consensus.connect(SECOND).deactivatePeer(peerId2);
+
+        const signatures1 = [
+            await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(['bytes32'], [peerId1]))),
+            await SECOND.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(['bytes32'], [peerId1]))),
+        ];
+        const validators = [ownerAddress, secondAddress];
+
+        await consensus.setValidator(ownerAddress, true);
+        await consensus.setValidator(secondAddress, true);
+
+        // Report Peer 1
+        await consensus.reportPeer(signatures1, validators, peerId1);
+
+        const validatorRewardOwner1 = await consensus.validatorRewards(ownerAddress);
+        const validatorRewardSecond1 = await consensus.validatorRewards(secondAddress);
+        expect(validatorRewardOwner1).to.be.gt(0);
+        expect(validatorRewardSecond1).to.be.gt(0);
+
+        const signatures3 = [
+            await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(['bytes32'], [peerId3]))),
+            await SECOND.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(['bytes32'], [peerId3]))),
+        ];
+
+        // Report Peer 3
+        await consensus.reportPeer(signatures3, validators, peerId3);
+
+        const validatorRewardOwner3 = await consensus.validatorRewards(ownerAddress);
+        const validatorRewardSecond3 = await consensus.validatorRewards(secondAddress);
+        expect(validatorRewardOwner3).to.be.gt(validatorRewardOwner1);
+        expect(validatorRewardSecond3).to.be.gt(validatorRewardSecond1);
+
+        const peer1Rewards = await consensus.rewards(peerId1);
+        const peer3Rewards = await consensus.rewards(peerId3);
+        expect(peer1Rewards).to.be.gt(0);
+        expect(peer3Rewards).to.be.gt(0);
+
+        // Claim rewards
+        const mintPayload = rewardToken.interface.encodeFunctionData('mint', [ownerAddress, wei(100)]);
+        const estimatedFees = await lZEndpointMockReceiver.estimateFees(
+            receiverChainId,
+            await rewardToken.getAddress(),
+            mintPayload,
+            false,
+            '0x'
+        );
+
+        await consensus.claim(peerId1, {value: estimatedFees[0]});
+        await consensus.claim(peerId3, {value: estimatedFees[0]});
+        await consensus.claim(ethers.encodeBytes32String(""), {value: estimatedFees[0]});
+
+        // Check final balances
+        const finalBalanceOwner = await rewardToken.balanceOf(ownerAddress);
+        const finalBalanceSecond = await rewardToken.balanceOf(secondAddress);
+
+        expect(finalBalanceOwner).to.be.gt(0);
+        expect(finalBalanceSecond).to.be.gt(0);
+
+        const finalPeer1Balance = await consensus.rewards(peerId1);
+        const finalPeer3Balance = await consensus.rewards(peerId3);
+
+        expect(finalPeer1Balance).to.equal(0);
+        expect(finalPeer3Balance).to.equal(0);
+    });
+  });
+
+  describe('Consensus Integration Tests for Joining at Different Times', function () {
+    it('should handle peers joining at different times and calculate rewards correctly', async () => {
+        const peerId1 = generatePeerID();
+        const peerId2 = generatePeerID();
+        const peerId3 = generatePeerID();
+
+        // Peer 1 joins
+        await consensus.connect(SECOND).registerPeer(peerId1, 250);
+        expect(await consensus.totalContributions()).to.equal(250);
+
+        // Advance time by 10 days
+        const startTime = Number((await consensus.rewardStart()).toString());
+        await setTime(startTime + oneDay * 2);
+
+        // Peer 2 joins
+        await consensus.connect(SECOND).registerPeer(peerId2, 300);
+        expect(await consensus.totalContributions()).to.equal(550);
+
+        // Advance time by 30 days (total 40 days)
+        await setTime(startTime + oneDay * 3);
+
+        // Peer 3 joins
+        await consensus.connect(SECOND).registerPeer(peerId3, 200);
+        expect(await consensus.totalContributions()).to.equal(750);
+
+        // Advance time by 50 more days (total 90 days, end of initial period)
+        await setTime(startTime + oneDay * 90);
+
+        const initialDailyReward = await rewardToken.cap() * BigInt(20) / BigInt(100) / BigInt(90);
+
+        // Verify rewards for each peer
+        const peer1Rewards = await consensus.earned(peerId1);
+        const peer2Rewards = await consensus.earned(peerId2);
+        const peer3Rewards = await consensus.earned(peerId3);
+
+        // Calculated expected rewards
+        const initialPeriodRewards = initialDailyReward * BigInt(90);
+
+        expect(peer1Rewards + peer2Rewards + peer3Rewards).to.be.closeTo(initialPeriodRewards, 10); // Allow small margin for rounding errors
+    });
+
+    it('should handle peers joining and deactivating across halving periods', async () => {
+        const peerId1 = generatePeerID();
+        const peerId2 = generatePeerID();
+        const peerId3 = generatePeerID();
+
+        await consensus.setValidator(ownerAddress, true);
+
+        // Peer 1 joins
+        await consensus.connect(SECOND).registerPeer(peerId1, 250);
+        expect(await consensus.totalContributions()).to.equal(250);
+
+        // Advance time to end of initial period (90 days)
+        const startTime = Number((await consensus.rewardStart()).toString());
+        await setTime(startTime + oneDay * 90 - 1);
+
+        
+        // Peer 2 joins
+        await consensus.connect(SECOND).registerPeer(peerId2, 250);
+        const peer1RewardsInitial = await consensus.earned(peerId1);
+
+        expect(await consensus.totalContributions()).to.equal(500);
+
+        
+        // Advance time by 1 year (365 days total)
+        await setTime(startTime + oneDay * 365);
+
+        const peer1RewardsAfterYear1 = await consensus.earned(peerId1) - peer1RewardsInitial;
+        const peer2RewardsAfterYear1 = await consensus.earned(peerId2);
+
+        expect(BigInt(fromWei(peer1RewardsAfterYear1))).to.be.closeTo(BigInt(fromWei(peer2RewardsAfterYear1)), 10);
+
+        // Peer 3 joins
+        await consensus.connect(SECOND).registerPeer(peerId3, 200);
+        expect(await consensus.totalContributions()).to.equal(700);
+
+        // Advance time by another year (730 days total)
+        await setTime(startTime + oneDay * 365 * 2);
+
+        // Verify rewards for each peer
+        const peer1Rewards = await consensus.earned(peerId1);
+        const peer2Rewards = await consensus.earned(peerId2);
+        const peer3Rewards = await consensus.earned(peerId3);
+
+        const rewards = await lib.calculateAccumulatedDistribution(await rewardToken.cap(), await consensus.rewardStart(), await consensus.rewardStart(), await getCurrentBlockTime());
+
+        // Calculated expected rewards
+        const initialDailyReward = await rewardToken.cap() * BigInt(20) / BigInt(100) / BigInt(90);
+        const halvedDailyReward = initialDailyReward / BigInt(2); // Rewards are halved after initial period
+        const halvedDailyReward2 = halvedDailyReward / BigInt(2); // Rewards are halved again after 1 year
+
+        const totalRewards = initialDailyReward * BigInt(90) + halvedDailyReward * BigInt(365 - 90) + halvedDailyReward2 * BigInt(365);
+
+        expect(rewards).to.be.closeTo(totalRewards, 10);
+
+        expect(peer1Rewards + peer2Rewards + peer3Rewards).to.be.closeTo(totalRewards, 10); // Allow small margin for rounding errors
+    });
+
+    it('should handle peers joining and deactivating between halving periods', async () => {
+        const peerId1 = generatePeerID();
+        const peerId2 = generatePeerID();
+
+        await consensus.setValidator(ownerAddress, true);
+
+        const startTime = Number((await consensus.rewardStart()).toString());
+
+        await setTime(startTime - 1);
+
+        // Peer 1 joins
+        await consensus.connect(SECOND).registerPeer(peerId1, 250);
+        expect(await consensus.totalContributions()).to.equal(250);
+
+        // Advance time to end of initial period (90 days)
+        await setTime(startTime + oneDay * 90);
+
+        // Peer 2 joins
+        await consensus.connect(SECOND).registerPeer(peerId2, 300);
+        expect(await consensus.totalContributions()).to.equal(550);
+
+        // Advance time by 6 months (180 days total)
+        await setTime(startTime + oneDay * 180);
+        // Peer 2 deactivates
+        await consensus.connect(SECOND).deactivatePeer(peerId2);
+
+        expect(await consensus.totalContributions()).to.equal(250);
+
+        // Advance time by another 6 months (365 days total)
+        await setTime(startTime + oneDay * 365);
+
+        // Verify rewards for each peer
+        const peer1Rewards = await consensus.earned(peerId1);
+        const peer2Rewards = await consensus.earned(peerId2);
+
+        // Calculated expected rewards
+        const initialDailyReward = await rewardToken.cap() * BigInt(20) / BigInt(100) / BigInt(90);
+        const halvedDailyReward = initialDailyReward / BigInt(2); // Rewards are halved after initial period
+
+        const expectedRewards = initialDailyReward * BigInt(90) + halvedDailyReward * BigInt(275);
+
+        expect(peer1Rewards + peer2Rewards).to.be.closeTo(expectedRewards, 10); // Allow small margin for rounding errors
+    });
+ });
+
+
 
   describe('removeUpgradeability', () => {
     it('should prevent future upgrades', async () => {
