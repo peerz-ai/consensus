@@ -246,6 +246,40 @@ describe('Consensus', function () {
     });
   });
 
+  describe('getActivePeers', () => {
+    it('should get active peers', async () => {
+      const peerId = generatePeerID();
+      const peerId2 = generatePeerID();
+      await consensus.connect(SECOND).registerPeer(peerId, 250);
+      await consensus.connect(SECOND).registerPeer(peerId2, 250);
+      const activePeers = await consensus.getActivePeers();
+      expect(activePeers[0]).to.equal(2);
+      expect(activePeers[1]).to.equal(500);
+    });
+
+    it('should get active peers range', async () => {
+      const peerId = generatePeerID();
+      const peerId2 = generatePeerID();
+      const peerId3 = generatePeerID();
+      const peerId4 = generatePeerID();
+      const peerId5 = generatePeerID();
+
+      await consensus.connect(SECOND).registerPeer(peerId, 250);
+      await consensus.connect(SECOND).registerPeer(peerId2, 200);
+      await consensus.connect(SECOND).registerPeer(peerId3, 150);
+      await consensus.connect(SECOND).registerPeer(peerId4, 100);
+      await consensus.connect(SECOND).registerPeer(peerId5, 50);
+
+      const activePeers = await consensus.getActivePeersRange(1, 3);
+      expect(activePeers[0][0]).to.equal(peerId2);
+      expect(activePeers[0][1]).to.equal(peerId3);
+      expect(activePeers[0][2]).to.equal(peerId4);
+      expect(activePeers[1][0]).to.equal(200);
+      expect(activePeers[1][1]).to.equal(150);
+      expect(activePeers[1][2]).to.equal(100);
+    });
+  });
+
 
   describe('validate', () => {
     it('should validate 20% distributed the first 90 days', async () => {

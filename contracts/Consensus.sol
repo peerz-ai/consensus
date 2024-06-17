@@ -145,10 +145,31 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
     }
 
     /**
-     * @dev Returns the active peers.
+     * @dev Returns the active peers count and the total contributions.
+     * @return activePeersCount The count of active peers.
+     * @return totalContributions The total contributions.
      */
-    function getActivePeers() external view returns (bytes32[] memory) {
-        return activePeers;
+    function getActivePeers() external view returns (uint256, uint256) {
+        return (activePeers.length, totalContributions);
+    }
+
+    /**
+     * @dev Returns the active peers under the given index range.
+     * @param start The start index of the active peers.
+     * @param end The end index of the active peers.
+     * @return peerIds The unique identifiers of the active peers.
+     * @return contributions The contributions of the active peers.
+     */
+    function getActivePeersRange(uint256 start, uint256 end) external view returns (bytes32[] memory, uint256[] memory) {
+        require(start < activePeers.length, "Invalid start index");
+        require(end < activePeers.length, "Invalid end index");
+        bytes32[] memory peerIds = new bytes32[](end - start + 1);
+        uint256[] memory _contributions = new uint256[](end - start + 1);
+        for (uint256 i = start; i <= end; i++) {
+            peerIds[i - start] = activePeers[i];
+            _contributions[i - start] = contributions[activePeers[i]];
+        }
+        return (peerIds, _contributions);
     }
 
     /**

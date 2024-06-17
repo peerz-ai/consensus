@@ -95,7 +95,12 @@ contract PRZ is IPRZ, ERC20Capped, ERC20Burnable, Ownable {
 
         for (uint i = 0; i < signatures.length; i++) {
             // Recover signer from signature
-            address signer = ECDSA.recover(keccak256(abi.encodePacked(address(this), _onlyEOA)), signatures[i]);
+            address signer = ECDSA.recover(keccak256(
+                abi.encodePacked(
+                    "\x19Ethereum Signed Message:\n32",
+                    keccak256(abi.encodePacked(address(this), _onlyEOA))
+                )
+            ), signatures[i]);
 
             if (balanceOf(signer) == 0 || signer == address(0)) {
                 continue;

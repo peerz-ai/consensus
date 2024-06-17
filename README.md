@@ -19,11 +19,11 @@ The `Consensus` smart contract is designed to operate within the decentralized d
 ### Validator and Peer Management
 
 - **`setValidator`**: Updates the state (active/inactive) of a validator.
-- **`registerPeer`**: Registers a new peer with their Ethereum address and peer id.
+- **`registerPeer`**: Registers a new peer with their peer id and contribution.
 
-### State Validation
+### Peer report
 
-- **`validateNetworkState`**: Processes network data inputs from peers, validates state transitions based on validator consensus, and updates internal state and token balances accordingly.
+- **`reportPeer`**: Validator consensus to report a peer
 
 ### Reward Distribution (POC)
 
@@ -31,4 +31,4 @@ The distribution is subject to a halving mechanism, which reduces the amount of 
 
 The initial distribution phase provides a higher rate of tokens to early participants, gradually decreasing over time through predefined halving events.
 
-- **`claim`**: Allows users to claim their accumulated rewards, sending tokens directly to their specified address.
+- **`claim`**: Allows users to claim their accumulated rewards.
