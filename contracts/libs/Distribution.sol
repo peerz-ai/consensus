@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @title Distribution
+ * @dev Library for calculating token distribution based on the time elapsed since the start
+ */
 library Distribution {
     uint256 constant SECONDS_IN_A_DAY = 86400;
     uint256 constant SECONDS_IN_A_YEAR = SECONDS_IN_A_DAY * 365;
@@ -8,11 +12,18 @@ library Distribution {
     uint256 constant INITIAL_PERIOD_SECONDS = DAYS_INITIAL_PERIOD * SECONDS_IN_A_DAY;
     uint256 constant INITIAL_DISTRIBUTION_FRACTION = 20; // Represents 20%
 
+    // Calculates the number of periods elapsed since the start
     function periodsElapsed(uint256 startTime, uint256 currentTime) public pure returns (uint256 period) {
         return 1 + (currentTime - startTime) / SECONDS_IN_A_YEAR;
     }
 
-    // Calculates daily token distribution based on the time elapsed since the start
+    /**
+     * @dev Calculates daily token distribution based on the time elapsed since the start
+     * @param maxSupply Maximum supply of the token
+     * @param startTime Start time of the distribution
+     * @param currentTime Current time
+     * @return distributionAmount Daily distribution amount
+     */
     function dailyDistribution(
         uint256 maxSupply,
         uint256 startTime,
@@ -37,7 +48,14 @@ library Distribution {
         return initialDailyDistribution >> periods;
     }
 
-    // Calculate accumulated distribution between last update and current time
+    /**
+     * @dev Calculates accumulated distribution between last update and current time
+     * @param maxSupply Maximum supply of the token
+     * @param startTime Start time of the distribution
+     * @param lastUpdate Last time the distribution was updated
+     * @param currentTime Current time
+     * @return accumulatedDistribution Accumulated distribution between last update and current time
+     */
     function calculateAccumulatedDistribution(
         uint256 maxSupply,
         uint256 startTime,

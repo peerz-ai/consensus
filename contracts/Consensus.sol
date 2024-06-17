@@ -12,8 +12,10 @@ import {Distribution} from "./libs/Distribution.sol";
 import {L2Sender} from "./L2Sender.sol";
 import {IConsensus} from "./interfaces/IConsensus.sol";
 
-import "hardhat/console.sol";
-
+/**
+ * @title Consensus
+ * @dev The Consensus contract is responsible for managing the consensus mechanism of the peerz network.
+ */
 contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
     bool public isNotUpgradeable;
 
@@ -74,6 +76,9 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         validators[account] = state;
     }
 
+    /**
+     * @dev Returns the reward per contribution.
+     */
     function rewardPerContribution() public view returns (uint256) {
         if (totalContributions == 0) {
             return rewardPerContributionStored;
@@ -85,7 +90,10 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         return rewardPerContributionStored + totalRewards * 1e18 / totalContributions;
     }
 
-
+    /**
+     * @dev Returns the total rewards earned by the peer.
+     * @param peerId The unique identifier of the peer.
+     */
     function earned(bytes32 peerId) public view returns (uint256) {
         return contributions[peerId] * (rewardPerContribution() - peerRewardPerContributionPaid[peerId]) / 1e18 + rewards[peerId];
     }
@@ -111,6 +119,11 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         emit PeerRegistered(peerId, msg.sender);
     }
 
+    /**
+     * @dev Updates the contribution of the peer with the given peer ID.
+     * @param peerId The unique identifier of the peer.
+     * @param contribution The new contribution of the peer.
+     */
     function updatePeerContribution(bytes32 peerId, uint256 contribution) external updateReward(peerId) onlyPeer(peerId) {
         require(contribution > 0, "CNS: invalid contribution");
 
@@ -120,16 +133,28 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         emit PeerContributionUpdated(peerId, contribution);
     }
 
+    /**
+     * @dev Updates the account address of the peer with the given peer ID.
+     * @param peerId The unique identifier of the peer.
+     * @param newAddress The new account address of the peer.
+     */
     function updatePeerAddress(bytes32 peerId, address newAddress) external updateReward(peerId) onlyPeer(peerId) {
         peers[peerId] = newAddress;
 
         emit PeerAddressUpdated(peerId, newAddress);
     }
 
+    /**
+     * @dev Returns the active peers.
+     */
     function getActivePeers() external view returns (bytes32[] memory) {
         return activePeers;
     }
 
+    /**
+     * @dev Deactivates a peer with the given peer ID.
+     * @param peerId The unique identifier of the peer.
+     */
     function _deactivatePeer(bytes32 peerId) internal updateReward(peerId) {
         require(peers[peerId] != address(0), "Peer not registered");
         // update total contributions
@@ -145,6 +170,10 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         emit PeerDeactivated(peerId);
     }
 
+    /**
+     * @dev Deactivates a peer with the given peer ID.
+     * @param peerId The unique identifier of the peer.
+     */
     function deactivatePeer(bytes32 peerId) public onlyPeer(peerId) {
         _deactivatePeer(peerId);
     }
@@ -244,6 +273,10 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
 
     /* ========== MODIFIERS ========== */
 
+    /**
+     * @dev Modifier to update the reward variables.
+     * @param peerId The unique identifier of the peer.
+     */
     modifier updateReward(bytes32 peerId) {
         rewardPerContributionStored = rewardPerContribution();
         lastUpdateTime = block.timestamp > rewardStart ? block.timestamp : rewardStart;
@@ -254,6 +287,10 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
         _;
     }
 
+    /**
+     * @dev Modifier to check if the caller is the peer.
+     * @param peerId The unique identifier of the peer.
+     */
     modifier onlyPeer(bytes32 peerId) {
         require(peers[peerId] == msg.sender, "CNS: not the peer address");
         _;
