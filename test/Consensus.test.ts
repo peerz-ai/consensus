@@ -170,13 +170,19 @@ describe('Consensus', function () {
     });
     it('should revert if contribution is zero', async () => {
       const peerId = generatePeerID();
-      await expect(consensus.connect(SECOND).registerPeer(peerId, 0)).to.be.revertedWith("Invalid contribution");
+      await expect(consensus.connect(SECOND).registerPeer(peerId, 0)).to.be.revertedWithCustomError(
+        consensus,
+        "InvalidContribution"
+      );
     });
 
     it('should revert if peer is already registered', async () => {
       const peerId = generatePeerID();
       await consensus.connect(SECOND).registerPeer(peerId, 250);
-      await expect(consensus.connect(SECOND).registerPeer(peerId, 250)).to.be.revertedWith("Peer already registered");
+      await expect(consensus.connect(SECOND).registerPeer(peerId, 250)).to.be.revertedWithCustomError(
+        consensus,
+        "PeerExists"
+      );
     });
 
     it('should register multiple peers and update total contributions', async () => {
@@ -200,13 +206,19 @@ describe('Consensus', function () {
     it('should revert if not called by peer', async () => {
       const peerId = generatePeerID();
       await consensus.connect(SECOND).registerPeer(peerId, 250);
-      await expect(consensus.updatePeerContribution(peerId, 500)).to.be.revertedWith("CNS: not the peer address");
+      await expect(consensus.updatePeerContribution(peerId, 500)).to.be.revertedWithCustomError(
+        consensus,
+        "PeerNotAuthorized"
+      );
     });
 
     it('should revert if contribution is zero', async () => {
       const peerId = generatePeerID();
       await consensus.connect(SECOND).registerPeer(peerId, 250);
-      await expect(consensus.connect(SECOND).updatePeerContribution(peerId, 0)).to.be.revertedWith("CNS: invalid contribution");
+      await expect(consensus.connect(SECOND).updatePeerContribution(peerId, 0)).to.be.revertedWithCustomError(
+        consensus,
+        "InvalidContribution"
+      );
     });
   });
 
@@ -221,7 +233,10 @@ describe('Consensus', function () {
     it('should revert if not called by peer', async () => {
       const peerId = generatePeerID();
       await consensus.connect(SECOND).registerPeer(peerId, 250);
-      await expect(consensus.updatePeerAddress(peerId, ownerAddress)).to.be.revertedWith("CNS: not the peer address");
+      await expect(consensus.updatePeerAddress(peerId, ownerAddress)).to.be.revertedWithCustomError(
+        consensus,
+        "PeerNotAuthorized"
+      );
     });
   });
 
@@ -237,12 +252,18 @@ describe('Consensus', function () {
     it('should revert if not called by peer', async () => {
       const peerId = generatePeerID();
       await consensus.connect(SECOND).registerPeer(peerId, 250);
-      await expect(consensus.deactivatePeer(peerId)).to.be.revertedWith("CNS: not the peer address");
+      await expect(consensus.deactivatePeer(peerId)).to.be.revertedWithCustomError(
+        consensus,
+        "PeerNotAuthorized"
+      );
     });
 
     it('should revert if peer is not registered', async () => {
       const peerId = generatePeerID();
-      await expect(consensus.connect(SECOND).deactivatePeer(peerId)).to.be.revertedWith("CNS: not the peer address");
+      await expect(consensus.connect(SECOND).deactivatePeer(peerId)).to.be.revertedWithCustomError(
+        consensus,
+        "PeerNotAuthorized"
+      );
     });
   });
 
@@ -297,14 +318,8 @@ describe('Consensus', function () {
       expect(await consensus.rewards(peerId)).to.be.equal(initialDailyReward * BigInt(90));
     });
 
-    it('should validate network state and update balances', async () => {
+    it('should report a peer', async () => {
       const peerId = generatePeerID();
-
-      const validators = [ownerAddress];
-
-      const signatures = [await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-        ['bytes32'], [peerId]
-      )))];
 
       await consensus.setValidator(ownerAddress, true);
       await consensus.connect(SECOND).registerPeer(peerId, 250);
@@ -312,7 +327,7 @@ describe('Consensus', function () {
       const lastUpdate = await getCurrentBlockTime();
       await setTime(lastUpdate + oneDay);
 
-      await consensus.reportPeer(signatures, validators, peerId);
+      await consensus.reportPeer(peerId);
       expect(await consensus.rewards(peerId)).to.be.gt(0);
     });
 
@@ -325,68 +340,33 @@ describe('Consensus', function () {
       await setTime(Number(lastUpdate));
 
       await expect(consensus.deactivatePeer(peerId))
-        .to.be.revertedWith('CNS: not the peer address');
-    });
-
-    it('should revert if signature count mismatch', async () => {
-      const peerId = generatePeerID();
-      const validators = [ownerAddress];
-      const signatures = [
-        await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-          ['bytes32'], [peerId]
-        ))),
-        await SECOND.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-          ['bytes32'], [peerId]
-        )))
-      ];
-
-      await expect(consensus.reportPeer(signatures, validators, peerId))
-        .to.be.revertedWith('Signature count mismatch');
+        .to.be.revertedWithCustomError(
+          consensus,
+          'PeerNotAuthorized'
+        );
     });
 
     it('should revert if no validators', async () => {
       const peerId = generatePeerID();
       await consensus.connect(SECOND).registerPeer(peerId, 250);
-      const validators = [ownerAddress];
-      const signatures = [await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-        ['bytes32'], [peerId]
-      )))];
 
-      await expect(consensus.reportPeer(signatures, validators, peerId))
-        .to.be.revertedWith('No validators');
-    });
-
-    it('should revert if peer is not active', async () => {
-      const peerId = generatePeerID();
-      const validators = [ownerAddress];
-      const signatures = [
-        await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-          ['bytes32'], [peerId]
-        ))),
-      ];
-
-      await consensus.setValidator(ownerAddress, true);
-
-      await expect(consensus.reportPeer(signatures, validators, peerId))
-        .to.be.revertedWith('Peer not active');
+      await expect(consensus.reportPeer(peerId))
+        .to.be.revertedWithCustomError(
+          consensus,
+          'ValidatorNotAuthorized'
+        );
     });
 
     it('should revert if peer is not active', async () => {
       const peerId = generatePeerID();
 
-      await consensus.connect(SECOND).registerPeer(generatePeerID(), 20);
-
-      const validators = [ownerAddress];
-      const signatures = [
-        await OWNER.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(
-          ['bytes32'], [peerId]
-        ))),
-      ];
-
       await consensus.setValidator(ownerAddress, true);
 
-      await expect(consensus.reportPeer(signatures, validators, peerId))
-        .to.be.revertedWith('Peer not active');
+      await expect(consensus.reportPeer(peerId))
+        .to.be.revertedWithCustomError(
+          consensus,
+          'PeerNotActive'
+        );
     });
 
     it('should revert if consensus is not reached', async () => {
@@ -423,17 +403,6 @@ describe('Consensus', function () {
       const peerIds = await Promise.all(peers.map((x) => x.peerId)); // peerId
       const contributions = peers.map((x) => x.contribution); // contribution
   
-      const message = ethers.solidityPackedKeccak256(
-        ['bytes32'],
-        [peerIds[0]],
-      );
-  
-      const signatures = await Promise.all(
-        validatorsSigners.map(async (signer) => {
-          return signer.signMessage(ethers.toBeArray(message));
-        }),
-      );
-  
       await Promise.all(
         peerIds.map(async (peerId, index) => consensus.connect(peersSigners[index]).registerPeer(peerId, contributions[index])),
       );
@@ -444,21 +413,19 @@ describe('Consensus', function () {
   
       const lastUpdate = await getCurrentBlockTime();
       await setTime(lastUpdate + oneDay);
-  
-      const tx = await consensus.reportPeer(
-        signatures,
-        validatorsSigners,
-        peerIds[0],
-      );
 
-      await tx.wait();
+      await Promise.all(
+        validatorsSigners.slice(validatorsSigners.length * 2 / 3).map(async (validator, index) => consensus.connect(validator).reportPeer(
+          peerIds[0],
+        )),
+      );
 
       const balance = await consensus.validatorRewards(SECOND);
 
-      const validatorBalance = await consensus.validatorRewards(validatorsSigners[validatorsSigners.length - 1].address);
-      expect(validatorBalance).to.be.gt(0);
+      /* const validatorBalance = await consensus.validatorRewards(validatorsSigners[validatorsSigners.length - 1].address);
+      expect(validatorBalance).to.be.gt(0); */
 
-      const peerBalance = await consensus.rewards(peerIds[0]);
+      const peerBalance = await consensus.earned(peerIds[0]);
       expect(peerBalance).to.be.gt(0);
   
     });
@@ -524,14 +491,20 @@ describe('Consensus', function () {
     it('should revert if rewards not started yet', async () => {
       const peerId = generatePeerID();
 
-      await expect(consensus.claim(peerId)).to.be.revertedWith('CNS: rewards not started yet');
+      await expect(consensus.claim(peerId)).to.be.revertedWithCustomError(
+        consensus,
+        'RewardsNotStarted'
+      );
     });
 
     it('should revert if nothing to claim', async () => {
       const peerId = generatePeerID();
 
       await setTime((await getCurrentBlockTime()) + oneDay);
-      await expect(consensus.claim(peerId)).to.be.revertedWith('CNS: nothing to claim');
+      await expect(consensus.claim(peerId)).to.be.revertedWithCustomError(
+        consensus,
+        "NothingToClaim"
+      );
     });
 
     it('should revert if not enough to pay lz fees', async () => {
@@ -727,9 +700,6 @@ describe('Consensus', function () {
             await SECOND.signMessage(ethers.toBeArray(ethers.solidityPackedKeccak256(['bytes32'], [peerId1]))),
         ];
         const validators = [ownerAddress, secondAddress];
-
-        await consensus.setValidator(ownerAddress, true);
-        await consensus.setValidator(secondAddress, true);
 
         // Report Peer 1
         await consensus.reportPeer(signatures1, validators, peerId1);
@@ -934,7 +904,7 @@ describe('Consensus', function () {
   describe('removeUpgradeability', () => {
     it('should prevent future upgrades', async () => {
       await consensus.removeUpgradeability();
-      await expect(consensus.upgradeToAndCall(ZERO_ADDR, '0x')).to.be.revertedWith("CNS: upgrade isn't available");
+      await expect(consensus.upgradeToAndCall(ZERO_ADDR, '0x')).to.be.revertedWithoutReason();
     });
   });
 

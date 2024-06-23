@@ -10,6 +10,13 @@ interface IConsensus {
     event PeerRegistered(bytes32 indexed peerId, address indexed account);
 
     /**
+     * The event that is emitted when the validator is registered or unregistered.
+     * @param account The validator's address.
+     * @param isActive The validator's state.
+     */
+    event ValidatorStateChanged(address indexed account, bool isActive);
+
+    /**
      * The event that is emitted when the peer's contribution is updated.
      * @param peerId The peer's id.
      * @param contribution The peer's contribution.
@@ -43,6 +50,68 @@ interface IConsensus {
      * @param amount The amount of tokens.
      */
     event UserClaimed(address indexed user, address receiver, uint256 amount);
+
+    /**
+     * The event that is emitted when the validator's rewards are updated.
+     * @param account The validator's address.
+     * @param amount The validator's amount.
+     */
+    event ValidatorRewardsUpdated(address indexed account, uint256 amount);
+
+    /**
+     * The error that is thrown when the peer exists.
+     */
+    error PeerExists();
+
+    /**
+     * The error that is thrown when the peer does not exist.
+     */
+    error PeerDoesNotExist();
+
+    /**
+     * The error that is thrown when the peer is not active.
+     */
+    error PeerNotActive();
+
+    /**
+     * The error that is thrown when the peer is not authorized.
+     */
+    error PeerNotAuthorized();
+
+    /**
+     * The error that is thrown when the validator state is invalid.
+     */
+    error InvalidValidatorState();
+
+    /**
+     * The error that is thrown when the validator is not authorized.
+     */
+    error ValidatorNotAuthorized();
+
+    /**
+     * The error that is thrown when the contribution is 0.
+     */
+    error InvalidContribution();
+
+    /**
+     * The error that is thrown when the index is invalid.
+     */
+    error InvalidIndex();
+
+    /**
+     * The error that is thrown when the peer already reported by an address.
+     */
+    error PeerAlreadyReported();
+
+    /**
+     * The error that is thrown when trying to claim before the reward start time.
+     */
+    error RewardsNotStarted();
+
+    /**
+     * The error that is thrown when trying to claim nothing.
+     */
+    error NothingToClaim();
 
     /**
      * The function to get the peer's address by id.
@@ -81,13 +150,9 @@ interface IConsensus {
 
     /**
      * The function to report the peer's contribution.
-     * @param signatures The validators signatures.
-     * @param validators The validators addresses.
      * @param peerId The peer's id.
      */
     function reportPeer(
-        bytes[] calldata signatures,
-        address[] calldata validators,
         bytes32 peerId
     ) external;
 

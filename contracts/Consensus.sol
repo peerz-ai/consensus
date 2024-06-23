@@ -33,18 +33,19 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
     uint256 public totalContributions;
     mapping(bytes32 => uint256) public contributions;
 
-
-    uint256 public constant VALIDATOR_PERCENTAGE = 20;
-
     bytes32[] public activePeers;
-
     mapping(bytes32 => address) public peers;
     mapping(bytes32 => uint256) public activePeersIndexes;
 
+    uint256 public constant VALIDATOR_PERCENTAGE = 20;
+
     mapping(address => bool) public validators;
     mapping(address => uint256) public validatorRewards;
+    uint256 public activeValidatorsCount;
 
-    address[] internal acceptedValidators;
+    mapping(bytes32 => mapping(address => bool)) public reportedPeers;
+    mapping(bytes32 => uint256) public reportedPeerCount;
+
 
     constructor() {
         _disableInitializers();
@@ -70,10 +71,18 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
     /**
      * @dev Set validator state
      * @param account The validator's address.
-     * @param state The validator's state.
+     * @param isActive The validator's state.
      */
-    function setValidator(address account, bool state) external onlyOwner {
-        validators[account] = state;
+    function setValidator(address account, bool isActive) external onlyOwner {
+        if (validators[account] == isActive) revert InvalidValidatorState();
+        if (isActive) {
+            activeValidatorsCount += 1;
+        } else {
+            activeValidatorsCount -= 1;
+        }
+        validators[account] = isActive;
+
+        emit ValidatorStateChanged(account, isActive);
     }
 
     /**
@@ -105,8 +114,8 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
      * @param contribution The contribution of the peer.
      */
     function registerPeer(bytes32 peerId, uint256 contribution) external updateReward(peerId) {
-        require(peers[peerId] == address(0), "Peer already registered");
-        require(contribution > 0, "Invalid contribution");
+        if (peers[peerId] != address(0)) revert PeerExists();
+        if (contribution == 0) revert InvalidContribution();
         // add peer
         peers[peerId] = msg.sender;
         contributions[peerId] = contribution;
@@ -125,7 +134,7 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
      * @param contribution The new contribution of the peer.
      */
     function updatePeerContribution(bytes32 peerId, uint256 contribution) external updateReward(peerId) onlyPeer(peerId) {
-        require(contribution > 0, "CNS: invalid contribution");
+        if (contribution == 0) revert InvalidContribution();
 
         totalContributions = totalContributions - contributions[peerId] + contribution;
         contributions[peerId] = contribution;
@@ -161,8 +170,7 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
      * @return contributions The contributions of the active peers.
      */
     function getActivePeersRange(uint256 start, uint256 end) external view returns (bytes32[] memory, uint256[] memory) {
-        require(start < activePeers.length, "Invalid start index");
-        require(end < activePeers.length, "Invalid end index");
+        if (start >= activePeers.length || end >= activePeers.length || start > end) revert InvalidIndex();
         bytes32[] memory peerIds = new bytes32[](end - start + 1);
         uint256[] memory _contributions = new uint256[](end - start + 1);
         for (uint256 i = start; i <= end; i++) {
@@ -177,7 +185,8 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
      * @param peerId The unique identifier of the peer.
      */
     function _deactivatePeer(bytes32 peerId) internal updateReward(peerId) {
-        require(peers[peerId] != address(0), "Peer not registered");
+        if (peers[peerId] == address(0)) revert PeerDoesNotExist();
+        if (activePeers.length == 0 || peerId != activePeers[activePeersIndexes[peerId]]) revert PeerNotActive();
         // update total contributions
         totalContributions -= contributions[peerId];
         contributions[peerId] = 0;
@@ -204,58 +213,33 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
      * @param peerId The unique identifier of the peer.
      */
     function reportPeer(
-        bytes[] calldata signatures,
-        address[] calldata validators_,
         bytes32 peerId
-    ) public {
-        require(signatures.length == validators_.length, "Signature count mismatch");
-        // require peer is active
-        require(activePeers.length > activePeersIndexes[peerId], "Peer not active");
-        require(peerId == activePeers[activePeersIndexes[peerId]], "Peer not active");
+    ) public onlyValidator {
+        if (activePeers.length == 0 || peerId != activePeers[activePeersIndexes[peerId]]) revert PeerNotActive();
+        if (reportedPeers[peerId][msg.sender]) revert PeerAlreadyReported();
 
-        acceptedValidators = new address[](0);
+        reportedPeers[peerId][msg.sender] = true;
+        reportedPeerCount[peerId] += 1;
 
-        address[] storage _acceptedValidators = acceptedValidators;
-        uint256 totalValidators = 0;
-        bytes32 dataHash = keccak256(
-            abi.encodePacked(
-                "\x19Ethereum Signed Message:\n32",
-                keccak256(abi.encodePacked(peerId))
-            )
-        );
+        // atleast 67% of validators should report
+        if (reportedPeerCount[peerId] >= activeValidatorsCount * 2 / 3) {
+            _deactivatePeer(peerId);
+            // Distribute rewards
+            rewards[peerId] = earned(peerId);
 
-        for (uint256 i = 0; i < signatures.length; i++) {
-            if (!validators[validators_[i]]) {
-                continue;
-            }
-            totalValidators++;
-            if (ECDSA.recover(dataHash, signatures[i]) == validators_[i]) {
-                _acceptedValidators.push(validators_[i]);
-            }
+            // slashing
+            uint256 validatorsReward = rewards[peerId] * VALIDATOR_PERCENTAGE / 100;
+            rewards[peerId] = rewards[peerId] - validatorsReward;
+
+            uint256 validatorReward = validatorsReward / reportedPeerCount[peerId];
+            /* for (uint256 i = 0; i < reportedPeerCount[peerId]; i++) {
+                address validator = _acceptedValidators[i];
+                validatorRewards[validator] += validatorReward;
+                // emit event
+                emit BalancesUpdated(validator, validatorReward);
+            } */
         }
 
-        require(totalValidators > 0, "No validators");
-
-        // Ensure at least 66% consensus
-        require((_acceptedValidators.length * 100) / totalValidators >= 66, "Consensus not reached");
-
-        // Deactivate peer
-        _deactivatePeer(peerId);
-
-        // Distribute rewards
-        rewards[peerId] = earned(peerId);
-
-        // slashing
-        uint256 validatorsReward = rewards[peerId] * VALIDATOR_PERCENTAGE / 100;
-        rewards[peerId] = rewards[peerId] - validatorsReward;
-
-        uint256 validatorReward = validatorsReward / _acceptedValidators.length;
-        for (uint256 i = 0; i < _acceptedValidators.length; i++) {
-            address validator = _acceptedValidators[i];
-            validatorRewards[validator] += validatorReward;
-            // emit event
-            emit BalancesUpdated(validator, validatorReward);
-        }
     }
 
     /**
@@ -263,33 +247,31 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
      * @param peerId The unique identifier of the peer. (0x for validators)
      */
     function claim(bytes32 peerId) public payable updateReward(peerId) {
-        require(block.timestamp > rewardStart, "CNS: rewards not started yet");
+        if (block.timestamp < rewardStart) revert RewardsNotStarted();
 
-        if (peerId != bytes32("")) {
+        if (peerId != bytes32(0)) {
             uint256 reward = rewards[peerId];
-            require(reward > 0, "CNS: nothing to claim");
+            if (reward == 0) revert NothingToClaim();
             rewards[peerId] = 0;
             L2Sender(l2Sender).sendMintMessage{value: msg.value}(peers[peerId], reward, msg.sender);
             emit UserClaimed(peers[peerId], msg.sender, reward);
         } else {
             uint256 validatorReward = validatorRewards[msg.sender];
-            require(validatorReward > 0, "CNS: nothing to claim");
+            if (validatorReward == 0) revert NothingToClaim();
             validatorRewards[msg.sender] = 0;
             L2Sender(l2Sender).sendMintMessage{value: msg.value}(msg.sender, validatorReward, msg.sender);
             emit UserClaimed(msg.sender, msg.sender, validatorReward);
         }
     }
 
-    /**********************************************************************************************/
-    /*** UUPS                                                                                   ***/
-    /**********************************************************************************************/
-
     function removeUpgradeability() external onlyOwner {
         isNotUpgradeable = true;
     }
 
     function _authorizeUpgrade(address) internal view override onlyOwner {
-        require(!isNotUpgradeable, "CNS: upgrade isn't available");
+        if (isNotUpgradeable) {
+            revert();
+        }
     }
 
     /* ========== MODIFIERS ========== */
@@ -301,7 +283,7 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
     modifier updateReward(bytes32 peerId) {
         rewardPerContributionStored = rewardPerContribution();
         lastUpdateTime = block.timestamp > rewardStart ? block.timestamp : rewardStart;
-        if (peerId != bytes32("")) {
+        if (peerId != bytes32(0)) {
             rewards[peerId] = earned(peerId);
             peerRewardPerContributionPaid[peerId] = rewardPerContributionStored;
         }
@@ -313,7 +295,19 @@ contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
      * @param peerId The unique identifier of the peer.
      */
     modifier onlyPeer(bytes32 peerId) {
-        require(peers[peerId] == msg.sender, "CNS: not the peer address");
+        if (peers[peerId] != msg.sender) {
+            revert PeerNotAuthorized();
+        }
+        _;
+    }
+
+    /**
+     * @dev Modifier to check if the caller is a validator.
+     */
+    modifier onlyValidator() {
+        if (!validators[msg.sender]) {
+            revert ValidatorNotAuthorized();
+        }
         _;
     }
 }
