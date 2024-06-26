@@ -36,6 +36,11 @@
     "typescript": ">=4.5.0"
   },
   "dependencies": {
-    "@layerzerolabs/lz-evm-oapp-v2": "^2.3.21"
+    "@layerzerolabs/lz-evm-messagelib-v2": "^2.3.24",
+    "@layerzerolabs/lz-evm-oapp-v2": "^2.3.24",
+    "@layerzerolabs/lz-evm-protocol-v2": "^2.3.24",
+    "@layerzerolabs/test-devtools-evm-hardhat": "^0.2.4",
+    "@layerzerolabs/toolbox-hardhat": "^0.2.33",
+    "solidity-bytes-utils": "^0.8.2"
   }
 }

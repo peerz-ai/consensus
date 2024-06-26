@@ -1,312 +1,192 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity 0.8.20;
+pragma solidity 0.8.22;
 
-import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import { ILayerZeroReceiver, Origin } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroReceiver.sol";
 
-import {Address} from "@openzeppelin/contracts/utils/Address.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import { ECDSA } from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
-import {Distribution} from "./libs/Distribution.sol";
+import { IConsensus } from "./interfaces/IConsensus.sol";
 
-import {L2Sender} from "./L2Sender.sol";
-import {IConsensus} from "./interfaces/IConsensus.sol";
+import "hardhat/console.sol";
 
-/**
- * @title Consensus
- * @dev The Consensus contract is responsible for managing the consensus mechanism of the peerz network.
- */
-contract Consensus is IConsensus, OwnableUpgradeable, UUPSUpgradeable {
-    bool public isNotUpgradeable;
+contract Consensus is IConsensus, ILayerZeroReceiver {
+    uint256 public constant COMMIT_PHASE_DURATION = 12 hours;
+    uint256 public constant REVEAL_PHASE_DURATION = 12 hours;
 
-    address public l2Sender;
+    address public lzEndpoint;
+    bytes32 public lzDest;
+    uint32 public lzEid;
 
-    uint256 public rewardStart;
-    uint256 public maxSupply;
+    uint256 public totalReports;
 
-    uint256 public lastUpdateTime;
-    uint256 public rewardPerContributionStored;
+    mapping(uint256 => Report) public reportDetails;
+    mapping(uint256 => mapping(address => bool)) public votes;
+    mapping(address => mapping(uint256 => Commit)) public commits;
 
-    mapping(bytes32 => uint256) public peerRewardPerContributionPaid;
-    mapping(bytes32 => uint256) public rewards;
+    mapping(address => uint256) public validatorJoinTime;
+    mapping(address => uint256) public validatorLastUpdateCount;
+    mapping(address => uint256) public validatorVotesCount;
 
-    uint256 public totalContributions;
-    mapping(bytes32 => uint256) public contributions;
-
-    bytes32[] public activePeers;
-    mapping(bytes32 => address) public peers;
-    mapping(bytes32 => uint256) public activePeersIndexes;
-
-    uint256 public constant VALIDATOR_PERCENTAGE = 20;
-
-    mapping(address => bool) public validators;
-    mapping(address => uint256) public validatorRewards;
     uint256 public activeValidatorsCount;
 
-    mapping(bytes32 => mapping(address => bool)) public reportedPeers;
-    mapping(bytes32 => uint256) public reportedPeerCount;
+    event ReportCreated(uint256 reportId, bytes32 peerId, uint256 startTime, uint256 activeValidatorsCount);
+    event VoteCommitted(uint256 reportId, address validator, bytes32 commitHash);
+    event VoteRevealed(uint256 reportId, address validator, bool vote);
+    event ConsensusReached(uint256 reportId, uint256 upvotes, uint256 downvotes);
 
-
-    constructor() {
-        _disableInitializers();
+    constructor(
+        address _lzEndpoint, bytes32 _lzDest, uint32 _lzEid
+    ) {
+        lzEndpoint = _lzEndpoint;
+        lzDest = _lzDest;
+        lzEid = _lzEid;
     }
 
-    function Consensus_init(address l2Sender_, uint256 rewardStart_, uint256 maxSupply_) external initializer {
-        __Ownable_init(msg.sender);
-        __UUPSUpgradeable_init();
-
-        l2Sender = l2Sender_;
-        rewardStart = rewardStart_;
-        maxSupply = maxSupply_;
+    function setLzDest(bytes32 _lzDest) public {
+        if(lzDest != bytes32(0)) {
+            revert LzDestAlreadySet();
+        }
+        lzDest = _lzDest;
     }
 
-    /**
-     * @dev Sets the L2 sender address.
-     * @param l2Sender_ The address of the L2 sender.
-     */
-    function setL2Sender(address l2Sender_) external onlyOwner {
-        l2Sender = l2Sender_;
+    function allowInitializePath(Origin calldata origin) public view virtual returns (bool) {
+        return origin.srcEid == lzEid && origin.sender == lzDest;
     }
 
-    /**
-     * @dev Set validator state
-     * @param account The validator's address.
-     * @param isActive The validator's state.
-     */
-    function setValidator(address account, bool isActive) external onlyOwner {
-        if (validators[account] == isActive) revert InvalidValidatorState();
-        if (isActive) {
-            activeValidatorsCount += 1;
+    function nextNonce(uint32, bytes32) public view virtual returns (uint64 nonce) {
+        return 0;
+    }
+
+    function lzReceive(
+        Origin calldata _origin,
+        bytes32 _guid,
+        bytes calldata payload,
+        address _executor,
+        bytes calldata _extraData
+    ) public payable override {
+        if (!allowInitializePath(_origin)) {
+            revert InvalidOrigin();
+        }
+        (address validator, bytes32 peerId, uint256 reportId) = abi.decode(payload, (address, bytes32, uint256));
+
+        if (peerId == bytes32(0)) { // New validator
+            if (validatorJoinTime[validator] != 0) {
+                revert ValidatorExists();
+            }
+            validatorJoinTime[validator] = block.timestamp;
+            activeValidatorsCount++;
+            validatorLastUpdateCount[validator] = totalReports;
+        } else { // New report
+            if (validatorJoinTime[validator] == 0) {
+                revert ValidatorDoesNotExist();
+            }
+            if (reportDetails[reportId].peerId != bytes32(0)) {
+                revert ReportExists();
+            }
+
+            totalReports++;
+            votes[reportId][validator] = true;
+            commits[validator][reportId] = Commit(keccak256(abi.encodePacked(true, "first")), true);
+            validatorVotesCount[validator]++;
+
+            reportDetails[reportId] = Report(
+                peerId,
+                block.timestamp,
+                activeValidatorsCount,
+                1,
+                1,
+                0
+            );
+
+            emit ReportCreated(reportId, peerId, block.timestamp, activeValidatorsCount);
+            emit VoteRevealed(reportId, validator, true);
+        }
+    }
+
+    function commitVote(uint256 reportId, bytes32 commitHash) public
+        validatorExists(msg.sender)
+        reportExists(reportId)
+    {
+        if (reportDetails[reportId].commitsCount == reportDetails[reportId].validatorsCount) {
+            revert AllValidatorsCommitted();
+        }
+        if (validatorJoinTime[msg.sender] > reportDetails[reportId].startTime) {
+            revert ValidatorCannotVote();
+        }
+        if (commits[msg.sender][reportId].commitHash != bytes32(0)) {
+            revert ValidatorAlreadyCommited();
+        }
+        if (block.timestamp > reportDetails[reportId].startTime + COMMIT_PHASE_DURATION) {
+            revert CommitPhaseEnded();
+        }
+
+        commits[msg.sender][reportId] = Commit(commitHash, false);
+        reportDetails[reportId].commitsCount++;
+
+        emit VoteCommitted(reportId, msg.sender, commitHash);
+    }
+
+    function revealVote(uint256 reportId, bool vote, string memory salt) public payable
+        validatorExists(msg.sender)
+        reportExists(reportId)
+    {
+        Report memory report = reportDetails[reportId];
+        if (report.validatorsCount != report.commitsCount || block.timestamp < report.startTime + COMMIT_PHASE_DURATION) {
+            revert RevealPhaseNotStarted();
+        }
+        if (block.timestamp > report.startTime + COMMIT_PHASE_DURATION + REVEAL_PHASE_DURATION) {
+            revert RevealPhaseEnded();
+        }
+        if (commits[msg.sender][reportId].commitHash == bytes32(0)) {
+            revert ValidatorCannotVote();
+        }
+        if (commits[msg.sender][reportId].revealed) {
+            revert VoteAlreadyRevealed();
+        }
+
+        bytes32 commitHash = keccak256(abi.encodePacked(vote, salt));
+        if (commitHash != commits[msg.sender][reportId].commitHash) {
+            revert InvalidReveal();
+        }
+
+        commits[msg.sender][reportId].revealed = true;
+        validatorLastUpdateCount[msg.sender]++;
+        totalReports++;
+
+        if (vote) {
+            reportDetails[reportId].upvotes++;
         } else {
-            activeValidatorsCount -= 1;
-        }
-        validators[account] = isActive;
-
-        emit ValidatorStateChanged(account, isActive);
-    }
-
-    /**
-     * @dev Returns the reward per contribution.
-     */
-    function rewardPerContribution() public view returns (uint256) {
-        if (totalContributions == 0) {
-            return rewardPerContributionStored;
-        }
-        uint256 totalRewards = Distribution.calculateAccumulatedDistribution(maxSupply, rewardStart, lastUpdateTime, block.timestamp);
-        if (totalRewards == 0) {
-            return rewardPerContributionStored;
-        }
-        return rewardPerContributionStored + totalRewards * 1e18 / totalContributions;
-    }
-
-    /**
-     * @dev Returns the total rewards earned by the peer.
-     * @param peerId The unique identifier of the peer.
-     */
-    function earned(bytes32 peerId) public view returns (uint256) {
-        return contributions[peerId] * (rewardPerContribution() - peerRewardPerContributionPaid[peerId]) / 1e18 + rewards[peerId];
-    }
-
-
-    /**
-     * @dev Registers a peer with the given peer ID and account address.
-     * @param peerId The unique identifier of the peer.
-     * @param contribution The contribution of the peer.
-     */
-    function registerPeer(bytes32 peerId, uint256 contribution) external updateReward(peerId) {
-        if (peers[peerId] != address(0)) revert PeerExists();
-        if (contribution == 0) revert InvalidContribution();
-        // add peer
-        peers[peerId] = msg.sender;
-        contributions[peerId] = contribution;
-        // add to active peers
-        activePeers.push(peerId);
-        activePeersIndexes[peerId] = activePeers.length - 1;
-        // update total contributions
-        totalContributions += contribution;
-        // emit event
-        emit PeerRegistered(peerId, msg.sender);
-    }
-
-    /**
-     * @dev Updates the contribution of the peer with the given peer ID.
-     * @param peerId The unique identifier of the peer.
-     * @param contribution The new contribution of the peer.
-     */
-    function updatePeerContribution(bytes32 peerId, uint256 contribution) external updateReward(peerId) onlyPeer(peerId) {
-        if (contribution == 0) revert InvalidContribution();
-
-        totalContributions = totalContributions - contributions[peerId] + contribution;
-        contributions[peerId] = contribution;
-
-        emit PeerContributionUpdated(peerId, contribution);
-    }
-
-    /**
-     * @dev Updates the account address of the peer with the given peer ID.
-     * @param peerId The unique identifier of the peer.
-     * @param newAddress The new account address of the peer.
-     */
-    function updatePeerAddress(bytes32 peerId, address newAddress) external updateReward(peerId) onlyPeer(peerId) {
-        peers[peerId] = newAddress;
-
-        emit PeerAddressUpdated(peerId, newAddress);
-    }
-
-    /**
-     * @dev Returns the active peers count and the total contributions.
-     * @return activePeersCount The count of active peers.
-     * @return totalContributions The total contributions.
-     */
-    function getActivePeers() external view returns (uint256, uint256) {
-        return (activePeers.length, totalContributions);
-    }
-
-    /**
-     * @dev Returns the active peers under the given index range.
-     * @param start The start index of the active peers.
-     * @param end The end index of the active peers.
-     * @return peerIds The unique identifiers of the active peers.
-     * @return contributions The contributions of the active peers.
-     */
-    function getActivePeersRange(uint256 start, uint256 end) external view returns (bytes32[] memory, uint256[] memory) {
-        if (start >= activePeers.length || end >= activePeers.length || start > end) revert InvalidIndex();
-        bytes32[] memory peerIds = new bytes32[](end - start + 1);
-        uint256[] memory _contributions = new uint256[](end - start + 1);
-        for (uint256 i = start; i <= end; i++) {
-            peerIds[i - start] = activePeers[i];
-            _contributions[i - start] = contributions[activePeers[i]];
-        }
-        return (peerIds, _contributions);
-    }
-
-    /**
-     * @dev Deactivates a peer with the given peer ID.
-     * @param peerId The unique identifier of the peer.
-     */
-    function _deactivatePeer(bytes32 peerId) internal updateReward(peerId) {
-        if (peers[peerId] == address(0)) revert PeerDoesNotExist();
-        if (activePeers.length == 0 || peerId != activePeers[activePeersIndexes[peerId]]) revert PeerNotActive();
-        // update total contributions
-        totalContributions -= contributions[peerId];
-        contributions[peerId] = 0;
-        // remove from active peers
-        bytes32 lastActivePeerId = activePeers[activePeers.length - 1];
-        activePeers[activePeersIndexes[peerId]] = lastActivePeerId;
-        activePeersIndexes[lastActivePeerId] = activePeersIndexes[peerId];
-        delete activePeersIndexes[peerId];
-        activePeers.pop();
-        
-        emit PeerDeactivated(peerId);
-    }
-
-    /**
-     * @dev Deactivates a peer with the given peer ID.
-     * @param peerId The unique identifier of the peer.
-     */
-    function deactivatePeer(bytes32 peerId) public onlyPeer(peerId) {
-        _deactivatePeer(peerId);
-    }
-
-    /**
-     * @dev Deactivates a peer with the given peer ID.
-     * @param peerId The unique identifier of the peer.
-     */
-    function reportPeer(
-        bytes32 peerId
-    ) public onlyValidator {
-        if (activePeers.length == 0 || peerId != activePeers[activePeersIndexes[peerId]]) revert PeerNotActive();
-        if (reportedPeers[peerId][msg.sender]) revert PeerAlreadyReported();
-
-        reportedPeers[peerId][msg.sender] = true;
-        reportedPeerCount[peerId] += 1;
-
-        // atleast 67% of validators should report
-        if (reportedPeerCount[peerId] >= activeValidatorsCount * 2 / 3) {
-            _deactivatePeer(peerId);
-            // Distribute rewards
-            rewards[peerId] = earned(peerId);
-
-            // slashing
-            uint256 validatorsReward = rewards[peerId] * VALIDATOR_PERCENTAGE / 100;
-            rewards[peerId] = rewards[peerId] - validatorsReward;
-
-            uint256 validatorReward = validatorsReward / reportedPeerCount[peerId];
-            /* for (uint256 i = 0; i < reportedPeerCount[peerId]; i++) {
-                address validator = _acceptedValidators[i];
-                validatorRewards[validator] += validatorReward;
-                // emit event
-                emit BalancesUpdated(validator, validatorReward);
-            } */
+            reportDetails[reportId].downvotes++;
         }
 
-    }
+        emit VoteRevealed(reportId, msg.sender, vote);
 
-    /**
-     * @dev Allows a user to claim their pending rewards.
-     * @param peerId The unique identifier of the peer. (0x for validators)
-     */
-    function claim(bytes32 peerId) public payable updateReward(peerId) {
-        if (block.timestamp < rewardStart) revert RewardsNotStarted();
-
-        if (peerId != bytes32(0)) {
-            uint256 reward = rewards[peerId];
-            if (reward == 0) revert NothingToClaim();
-            rewards[peerId] = 0;
-            L2Sender(l2Sender).sendMintMessage{value: msg.value}(peers[peerId], reward, msg.sender);
-            emit UserClaimed(peers[peerId], msg.sender, reward);
-        } else {
-            uint256 validatorReward = validatorRewards[msg.sender];
-            if (validatorReward == 0) revert NothingToClaim();
-            validatorRewards[msg.sender] = 0;
-            L2Sender(l2Sender).sendMintMessage{value: msg.value}(msg.sender, validatorReward, msg.sender);
-            emit UserClaimed(msg.sender, msg.sender, validatorReward);
+        // Check if the reveal phase is complete and finalize the consensus
+        if (reportDetails[reportId].upvotes + reportDetails[reportId].downvotes == reportDetails[reportId].validatorsCount) {
+            emit ConsensusReached(reportId, reportDetails[reportId].upvotes, reportDetails[reportId].downvotes);
+            // Send the consensus back to L1
+            sendConsensusToL1(reportId);
         }
     }
 
-    function removeUpgradeability() external onlyOwner {
-        isNotUpgradeable = true;
+    function sendConsensusToL1(uint256 reportId) internal {
+        bytes memory payload = abi.encode(reportId, reportDetails[reportId].upvotes, reportDetails[reportId].downvotes);
+        // Here you would send the payload back to L1 using LayerZero
+        // The actual implementation depends on the LayerZero library you are using
+        // For example:
+        // ILayerZeroEndpoint(lzEndpoint).send(lzEid, lzDest, payload, payable(address(this)), address(0), bytes(""));
     }
 
-    function _authorizeUpgrade(address) internal view override onlyOwner {
-        if (isNotUpgradeable) {
-            revert();
-        }
-    }
-
-    /* ========== MODIFIERS ========== */
-
-    /**
-     * @dev Modifier to update the reward variables.
-     * @param peerId The unique identifier of the peer.
-     */
-    modifier updateReward(bytes32 peerId) {
-        rewardPerContributionStored = rewardPerContribution();
-        lastUpdateTime = block.timestamp > rewardStart ? block.timestamp : rewardStart;
-        if (peerId != bytes32(0)) {
-            rewards[peerId] = earned(peerId);
-            peerRewardPerContributionPaid[peerId] = rewardPerContributionStored;
+    modifier validatorExists(address validator) {
+        if (validatorJoinTime[validator] == 0) {
+            revert ValidatorDoesNotExist();
         }
         _;
     }
 
-    /**
-     * @dev Modifier to check if the caller is the peer.
-     * @param peerId The unique identifier of the peer.
-     */
-    modifier onlyPeer(bytes32 peerId) {
-        if (peers[peerId] != msg.sender) {
-            revert PeerNotAuthorized();
-        }
-        _;
-    }
-
-    /**
-     * @dev Modifier to check if the caller is a validator.
-     */
-    modifier onlyValidator() {
-        if (!validators[msg.sender]) {
-            revert ValidatorNotAuthorized();
+    modifier reportExists(uint256 reportId) {
+        if (reportDetails[reportId].peerId == bytes32(0)) {
+            revert ReportDoesNotExist();
         }
         _;
     }
